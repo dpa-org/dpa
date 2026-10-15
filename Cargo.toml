@@ -1,0 +1,124 @@
+[workspace]
+members = ["plugins/demo", "plugins/ascii85", "dpa-wasm"]
+resolver = "2"
+
+[package]
+name = "dpa"
+version = "1.0.0"
+edition = "2024"
+description = "Data Processing & Analysis — flows as code"
+license = "Apache-2.0"
+repository = "https://github.com/dpa-org/dpa"
+readme = "README.md"
+keywords = ["data-processing", "analysis", "cli", "codec", "crypto", "workflow"]
+categories = ["command-line-utilities", "development-tools", "cryptography"]
+authors = ["dpa-org"]
+documentation = "https://docs.rs/dpa"
+homepage = "https://github.com/dpa-org/dpa"
+rust-version = "1.85"
+
+# crates.io packaging hygiene: keep dev artifacts and generated output out of
+# the published package. docs/ is intentionally included (plugin guide).
+exclude = ["output/", "archive/", "temp/", "dist/", "plugins/*.dll", "plugins/*.so", "plugins/*.dylib", "*.log", "*.err", "*.exe", "*.pdb"]
+
+# The bin is named dpa-cli so it does not collide with the `dpa` lib name on
+# Windows (cargo #6313 emits dpa.pdb for both). Installers copy dpa-cli.exe to
+# dpa.exe; the command users type stays `dpa`.
+[[bin]]
+name = "dpa-cli"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[lib]
+name = "dpa"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+aes = "0.8"
+anyhow = "1"
+base64 = "0.22"
+cbc = { version = "0.1", features = ["alloc"] }
+ecb = { version = "0.1", features = ["alloc"] }
+flate2 = "1"
+hex = "0.4"
+hmac = "0.12"
+md-5 = "0.10"
+rand = "0.9"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha1 = "0.10"
+sha2 = "0.10"
+
+# Python bindings: only compiled when the `python` feature is enabled.
+pyo3 = { version = "0.23", optional = true, features = ["abi3-py38", "extension-module"] }
+
+# op coverage: hash / crypto / codec / compress
+blake2 = "0.10"
+blowfish = "0.9"
+byteorder = "1"
+brotli = "8"
+des = "0.8"
+hkdf = "0.12"
+lzma-rs = "0.3"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+ripemd = "0.1"
+sha3 = "0.10"
+md4 = "0.10"
+sm3 = "0.4"
+sm4 = "0.4"
+
+# pure-Rust xz/lzma container (lzma-rs above), whirlpool
+whirlpool = "0.10"
+
+# NT Hash (built-in MD4), CSV<->JSON, DateTime ops
+csv = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "alloc"] }
+
+# YAML/XML conversion
+quick-xml = "0.37"
+
+# generate family — prime (Miller-Rabin big integer)
+num-bigint = "0.4"
+num-traits = "0.2"
+
+[features]
+default = ["cli"]
+cli = []
+python = ["dep:pyo3"]
+
+# Web/WASM: CLI-only & host-only deps are excluded from wasm32 targets.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+clap = "4"
+libloading = "0.8"
+rayon = "1.10"
+walkdir = "2"
+# bzip2 (libbz2 C bindings — host-only, see compress.rs cfg gate)
+bzip2 = { version = "0.4" }
+
+# v1.0 public-key analysis domain (analysis-only: no encrypt/sign). Host-only:
+# rsa/p256/p384/k256 pull rand_core->getrandom which has no wasm32-unknown-unknown
+# backend, so the whole module is cfg-gated off for wasm (see src/ops/mod.rs).
+pem = "3"
+x509-parser = "0.18"
+rsa = { version = "0.9", features = ["std", "pem", "sha2"] }
+p256 = { version = "0.14", features = ["arithmetic", "ecdsa", "pkcs8"] }
+p384 = { version = "0.14", features = ["arithmetic", "ecdsa", "pkcs8"] }
+k256 = { version = "0.14", features = ["arithmetic", "ecdsa", "pkcs8"] }
+ecdsa = { version = "0.17", features = ["der", "alloc"] }
+
+# wasm32-unknown-unknown: rand needs getrandom with the js backend.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+[dev-dependencies]
+# N3: property tests for parser surfaces (pem/hex/base64/asn1/json round-trips
+# and no-panic), see tests/proptest_parsers.rs. cargo-fuzz deferred to post-v1.0 CI.
+proptest = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

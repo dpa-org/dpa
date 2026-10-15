@@ -1,0 +1,15 @@
+# 示例流程：演示主刀能力（流程即代码）。
+#
+# 输入：Hello 的十六进制（48656C6C6F）
+# 步骤：hex 解码 -> 异或 0x2A -> SHA-256 摘要 -> hex 编码
+# 预期输出：0x2A 异或后为 "bOFFE"，其 SHA-256 摘要的 hex 形式。
+
+name: demo
+description: hex 解码 -> 异或 -> SHA-256 -> hex 编码
+steps:
+  - op: dpa:hex:decode
+  - op: dpa:xor
+    args:
+      key: "0x2A"
+  - op: dpa:sha256
+  - op: dpa:hex:encode

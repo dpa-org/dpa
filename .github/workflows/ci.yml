@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The plugin ABI test needs the demo plugin cdylib, which `cargo test`
+      # does not build on its own.
+      - name: Build plugins
+        run: cargo build -p dpa-plugin-demo -p dpa-plugin-ascii85
+
+      - name: test
+        run: cargo test --workspace
+
+      - name: package hygiene
+        run: |
+          cargo package --allow-dirty --list > /tmp/pkg_list.txt
+          if grep -Eq '^output/|^archive/|^dist/|^temp/|^target/|\.(dll|so|dylib)$' /tmp/pkg_list.txt; then
+            echo "::error::crates.io package contains non-source artifacts"
+            grep -E '^output/|^archive/|^dist/|^temp/|^target/|\.(dll|so|dylib)$' /tmp/pkg_list.txt
+            exit 1
+          fi

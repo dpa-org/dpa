@@ -1,0 +1,360 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    name: quality-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The plugin ABI test needs the demo plugin cdylib, which `cargo test`
+      # does not build on its own.
+      - name: Build plugins
+        run: cargo build -p dpa-plugin-demo -p dpa-plugin-ascii85
+
+      - name: test
+        run: cargo test --workspace
+
+      - name: package hygiene
+        run: |
+          cargo package --allow-dirty --list > /tmp/pkg_list.txt
+          if grep -Eq '^output/|^archive/|^dist/|^temp/|^target/|\.(dll|so|dylib)$' /tmp/pkg_list.txt; then
+            echo "::error::crates.io package contains non-source artifacts"
+            grep -E '^output/|^archive/|^dist/|^temp/|^target/|\.(dll|so|dylib)$' /tmp/pkg_list.txt
+            exit 1
+          fi
+
+  build-windows:
+    name: build-windows
+    needs: [quality]
+    runs-on: windows-latest
+    env:
+      # Link the C runtime statically so the released dpa.exe does not require
+      # the VC++ redistributable (the default MSVC build imports
+      # VCRUNTIME140.dll, which is not part of a stock Windows install).
+      RUSTFLAGS: -C target-feature=+crt-static
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build x86_64
+        run: cargo build --release --features cli
+
+      - name: Build aarch64
+        run: cargo build --release --features cli --target aarch64-pc-windows-msvc
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          $targets = @(
+            @{ triple = "x86_64-pc-windows-msvc";  bin = "target\release\dpa-cli.exe" },
+            @{ triple = "aarch64-pc-windows-msvc"; bin = "target\aarch64-pc-windows-msvc\release\dpa-cli.exe" }
+          )
+          foreach ($t in $targets) {
+            $name = "dpa-$ver-$($t.triple)"
+            $dir = "dist\$name"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            Copy-Item $t.bin "$dir\dpa.exe"
+            Copy-Item LICENSE, NOTICE, README.md, README.zh-CN.md $dir
+            Compress-Archive -Path $dir -DestinationPath "dist\$name.zip" -CompressionLevel Optimal
+            $hash = (Get-FileHash "dist\$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+            Set-Content -Path "dist\$name.zip.sha256" -Value "$hash  $name.zip" -Encoding Ascii
+          }
+          Get-ChildItem dist
+
+      # Run the packaged archive, not just the build output: this is what
+      # catches a binary that compiles but cannot start on a clean machine.
+      - name: Smoke test the artifact
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          $name = "dpa-$ver-x86_64-pc-windows-msvc"
+          Expand-Archive -Path "dist\$name.zip" -DestinationPath "$env:RUNNER_TEMP\smoke" -Force
+          $exe = "$env:RUNNER_TEMP\smoke\$name\dpa.exe"
+          $input = "$env:RUNNER_TEMP\smoke\in.txt"
+          Set-Content -Path $input -Value "Hello" -NoNewline -Encoding ascii
+          & $exe --version
+          $encoded = & $exe op base64:encode $input
+          if ($encoded -ne "SGVsbG8=") { throw "unexpected output from the packaged binary: $encoded" }
+          $count = (& $exe list | Select-Object -Last 1)
+          if ($count -notmatch '218') { throw "unexpected op count: $count" }
+          Write-Output "smoke test ok: $count"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dpa-windows
+          # Archives and their checksums only; the unpacked directories would
+          # collide as release assets (every platform has its own LICENSE, ...).
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  build-linux:
+    name: build-linux
+    needs: [quality]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu, x86_64-unknown-linux-musl
+
+      - name: Install toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu musl-tools
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build x86_64 (glibc)
+        run: cargo build --release --features cli
+
+      - name: Build x86_64 (static, musl)
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          AR_x86_64_unknown_linux_musl: ar
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release --features cli --target x86_64-unknown-linux-musl
+
+      - name: Build aarch64 (glibc)
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --features cli --target aarch64-unknown-linux-gnu
+
+      - name: Package
+        shell: bash
+        run: |
+          ver=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)
+          pack() {
+            local triple="$1" bin="$2"
+            local name="dpa-$ver-$triple"
+            mkdir -p "dist/$name"
+            cp "$bin" "dist/$name/dpa"
+            cp LICENSE NOTICE README.md README.zh-CN.md "dist/$name/"
+            tar -C dist -czf "dist/$name.tar.gz" "$name"
+            (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          }
+          pack x86_64-unknown-linux-gnu target/release/dpa-cli
+          pack x86_64-unknown-linux-musl target/x86_64-unknown-linux-musl/release/dpa-cli
+          pack aarch64-unknown-linux-gnu target/aarch64-unknown-linux-gnu/release/dpa-cli
+          ls -la dist
+
+      # Run both x86_64 archives from their extracted form, so the archive
+      # layout, the executable bit, and startup on a clean system are covered.
+      # The aarch64 archives are cross-compiled and cannot run on this runner.
+      - name: Smoke test the artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)
+          printf 'Hello' > /tmp/in.txt
+          for triple in x86_64-unknown-linux-gnu x86_64-unknown-linux-musl; do
+            name="dpa-$ver-$triple"
+            rm -rf /tmp/smoke && mkdir -p /tmp/smoke
+            tar -xzf "dist/$name.tar.gz" -C /tmp/smoke
+            bin="/tmp/smoke/$name/dpa"
+            echo "-- $triple --"
+            "$bin" --version
+            out=$("$bin" op base64:encode /tmp/in.txt)
+            [ "$out" = "SGVsbG8=" ] || { echo "unexpected output: $out"; exit 1; }
+            "$bin" list | tail -n 1
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dpa-linux
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  build-macos:
+    name: build-macos
+    needs: [quality]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build (arm64)
+        run: cargo build --release --features cli --target aarch64-apple-darwin
+
+      - name: Build (x86_64)
+        run: cargo build --release --features cli --target x86_64-apple-darwin
+
+      - name: Package (universal)
+        shell: bash
+        run: |
+          ver=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)
+          name="dpa-$ver-universal-apple-darwin"
+          mkdir -p "dist/$name"
+          lipo -create \
+            -output "dist/$name/dpa" \
+            target/aarch64-apple-darwin/release/dpa-cli \
+            target/x86_64-apple-darwin/release/dpa-cli
+          cp LICENSE NOTICE README.md README.zh-CN.md "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+          lipo -info "dist/$name/dpa"
+          ls -la dist
+
+      # macOS has no separate x86_64 runner here, but the universal binary
+      # contains both slices and runs natively on this (arm64) runner.
+      - name: Smoke test the artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)
+          name="dpa-$ver-universal-apple-darwin"
+          mkdir -p /tmp/smoke
+          tar -xzf "dist/$name.tar.gz" -C /tmp/smoke
+          bin="/tmp/smoke/$name/dpa"
+          printf 'Hello' > /tmp/in.txt
+          "$bin" --version
+          out=$("$bin" op base64:encode /tmp/in.txt)
+          [ "$out" = "SGVsbG8=" ] || { echo "unexpected output: $out"; exit 1; }
+          "$bin" list | tail -n 1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dpa-macos
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: publish-release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate release body
+        shell: bash
+        run: |
+          {
+            echo "dpa ${GITHUB_REF_NAME}"
+            echo
+            echo "Prebuilt binaries:"
+            echo
+            echo '| Platform | Archive |'
+            echo '| --- | --- |'
+            echo '| Windows x86_64 | `*-x86_64-pc-windows-msvc.zip` |'
+            echo '| Windows arm64 | `*-aarch64-pc-windows-msvc.zip` |'
+            echo '| Linux x86_64, glibc | `*-x86_64-unknown-linux-gnu.tar.gz` |'
+            echo '| Linux x86_64, static (musl) | `*-x86_64-unknown-linux-musl.tar.gz` |'
+            echo '| Linux arm64, glibc | `*-aarch64-unknown-linux-gnu.tar.gz` |'
+            echo '| macOS, universal (arm64 + x86_64) | `*-universal-apple-darwin.tar.gz` |'
+            echo
+            echo "A SHA256 checksum file is attached next to each archive."
+            echo
+            echo "See CHANGELOG.md for what changed in this release."
+          } > body.md
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t files < <(find artifacts -type f \
+            \( -name '*.zip' -o -name '*.tar.gz' -o -name '*.sha256' \) | sort)
+          echo "assets: ${#files[@]}"
+          printf '%s\n' "${files[@]}"
+          prerelease=()
+          case "$GITHUB_REF_NAME" in
+            *-rc*|*-alpha*|*-beta*) prerelease=(--prerelease) ;;
+          esac
+          # A previous attempt (or a re-run) may have left a release behind;
+          # start from a clean one, keeping the tag itself.
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "replacing the existing release for $GITHUB_REF_NAME (the tag is kept)"
+            gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+          if ! output=$(gh release create "$GITHUB_REF_NAME" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "dpa $GITHUB_REF_NAME" \
+                --notes-file body.md \
+                "${prerelease[@]}" \
+                "${files[@]}" 2>&1); then
+            status=$?
+            printf '%s\n' "$output"
+            # The raw log needs a login to read; an annotation does not, so put
+            # the reason there too.
+            echo "::error title=gh release create failed::$(printf '%s' "$output" | tail -n 3 | tr '\n' ' ')"
+            exit "$status"
+          fi
+          printf '%s\n' "$output"

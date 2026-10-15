@@ -1,0 +1,34 @@
+# Build output
+/target
+
+# Local-only notes and drafts (not published)
+/PLAN.internal.md
+/notes/
+
+# Debug logs and scratch output
+build*.log
+build*.txt
+check*.log
+full_test*.txt
+hex_*.txt
+list_out.txt
+rot_*.txt
+test_*.txt
+input_rot.txt
+build.err
+
+# Scratch directories
+/temp
+
+# Plugin build artifacts
+plugins/*.dll
+plugins/*.so
+plugins/*.dylib
+plugins/.dpa-plugin-hashes.json
+
+# Release output
+/dist
+
+# Review notes and archives kept out of the published package
+/output
+/archive

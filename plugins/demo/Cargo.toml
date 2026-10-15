@@ -1,0 +1,14 @@
+[package]
+name = "dpa-plugin-demo"
+version = "0.1.0"
+edition = "2021"
+description = "Official sample plugin for the dpa plugin ABI (see docs/PLUGIN.md)"
+authors = ["dpa-org"]
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+dpa = { path = "../..", default-features = false }
+anyhow = "1"

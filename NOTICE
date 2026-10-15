@@ -1,0 +1,15 @@
+dpa
+Copyright 2026 dpa-org
+
+This product includes material derived from CyberChef
+(https://github.com/gchq/CyberChef), Copyright 2016 Crown Copyright (GCHQ),
+licensed under the Apache License, Version 2.0.
+
+Specifically:
+  - src/recipe_map.rs carries the CyberChef operation-name mapping (zh/en),
+    derived from the CyberChef_zh-cn operation name map.
+  - src/recipe.rs mirrors CyberChef's published recipe formats (URL / CHEF /
+    JSON) so that dpa flows can interoperate with existing recipes.
+
+Those files and behaviors remain available to downstream users under the terms
+of the Apache License, Version 2.0.

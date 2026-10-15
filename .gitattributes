@@ -1,0 +1,19 @@
+# Normalize line endings to LF in the repository and in the working tree.
+# Overrides core.autocrlf so checkouts are identical on Windows/Linux/macOS.
+* text=auto eol=lf
+
+# Windows helper scripts stay CRLF for compatibility with legacy shells.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary artifacts: never diff or re-encode.
+*.dll binary
+*.so binary
+*.dylib binary
+*.exe binary
+*.pdb binary
+*.zip binary
+*.tar binary
+*.gz binary
+
