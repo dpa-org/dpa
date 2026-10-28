@@ -59,7 +59,7 @@ blake2 = "0.10"
 blowfish = "0.9"
 byteorder = "1"
 brotli = "8"
-des = "0.8"
+des = "0.9"
 hkdf = "0.12"
 lzma-rs = "0.3"
 pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
