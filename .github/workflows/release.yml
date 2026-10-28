@@ -14,7 +14,7 @@ env:
 jobs:
   quality:
     name: quality-gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -68,8 +68,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: Build x86_64
         run: cargo build --release --features cli
@@ -171,8 +171,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: Build (native aarch64)
         run: cargo build --release --features cli
@@ -226,27 +226,19 @@ jobs:
   build-linux:
     name: build-linux
     needs: [quality]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-musl, x86_64-unknown-linux-musl
+          targets: x86_64-unknown-linux-musl
 
       - name: Install toolchains
         run: |
           sudo apt-get update
-          sudo apt-get install -y musl-tools qemu-user-static
-          # aarch64 musl cross toolchain from musl.cc (prebuilt, no sysroot
-          # needed; statically linked, so the result also runs under QEMU)
-          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 300 \
-            -o /tmp/aarch64-linux-musl-cross.tgz \
-            https://musl.cc/aarch64-linux-musl-cross.tgz
-          tar -xzf /tmp/aarch64-linux-musl-cross.tgz -C /tmp
-          test -x /tmp/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc
-          echo "/tmp/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
+          sudo apt-get install -y musl-tools
 
       - name: Cache cargo
         uses: actions/cache@v6
@@ -255,8 +247,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: Build x86_64 (glibc)
         run: cargo build --release --features cli
@@ -267,13 +259,6 @@ jobs:
           AR_x86_64_unknown_linux_musl: ar
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
         run: cargo build --release --features cli --target x86_64-unknown-linux-musl
-
-      - name: Build aarch64 (static, musl)
-        env:
-          CC_aarch64_unknown_linux_musl: aarch64-linux-musl-gcc
-          AR_aarch64_unknown_linux_musl: aarch64-linux-musl-ar
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: aarch64-linux-musl-gcc
-        run: cargo build --release --features cli --target aarch64-unknown-linux-musl
 
       - name: Package
         shell: bash
@@ -290,21 +275,17 @@ jobs:
           }
           pack x86_64-unknown-linux-gnu target/release/dpa
           pack x86_64-unknown-linux-musl target/x86_64-unknown-linux-musl/release/dpa
-          pack aarch64-unknown-linux-musl target/aarch64-unknown-linux-musl/release/dpa
           ls -la dist
 
       # Run the packaged archives from their extracted form, so the archive
       # layout, the executable bit, and startup on a clean system are covered.
-      # The x86_64 binaries run natively; aarch64 musl is statically linked and
-      # runs on this x64 runner through QEMU (binfmt registered by
-      # qemu-user-static), so every shipped Linux archive is actually executed.
       - name: Smoke test the artifacts
         shell: bash
         run: |
           set -euo pipefail
           ver=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)
           printf 'Hello' > /tmp/in.txt
-          for triple in x86_64-unknown-linux-gnu x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+          for triple in x86_64-unknown-linux-gnu x86_64-unknown-linux-musl; do
             name="dpa-$ver-$triple"
             rm -rf /tmp/smoke && mkdir -p /tmp/smoke
             tar -xzf "dist/$name.tar.gz" -C /tmp/smoke
@@ -322,6 +303,77 @@ jobs:
           name: dpa-linux
           path: |
             dist/*.zip
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
+  build-linux-arm64:
+    name: build-linux-arm64
+    needs: [quality]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+
+      - name: Install toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-
+
+      - name: Build aarch64 (static, musl)
+        env:
+          CC_aarch64_unknown_linux_musl: musl-gcc
+          AR_aarch64_unknown_linux_musl: ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release --features cli --target aarch64-unknown-linux-musl
+
+      - name: Package
+        shell: bash
+        run: |
+          ver=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)
+          triple=aarch64-unknown-linux-musl
+          name="dpa-$ver-$triple"
+          mkdir -p "dist/$name"
+          cp "target/$triple/release/dpa" "dist/$name/dpa"
+          cp LICENSE NOTICE README.md README.zh-CN.md "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          ls -la dist
+
+      - name: Smoke test the artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)
+          name="dpa-$ver-aarch64-unknown-linux-musl"
+          rm -rf /tmp/smoke && mkdir -p /tmp/smoke
+          tar -xzf "dist/$name.tar.gz" -C /tmp/smoke
+          bin="/tmp/smoke/$name/dpa"
+          printf 'Hello' > /tmp/in.txt
+          "$bin" --version
+          out=$("$bin" op base64:encode /tmp/in.txt)
+          [ "$out" = "SGVsbG8=" ] || { echo "unexpected output: $out"; exit 1; }
+          "$bin" list | tail -n 1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dpa-linux-arm64
+          path: |
             dist/*.tar.gz
             dist/*.sha256
           if-no-files-found: error
@@ -345,8 +397,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: Build (arm64)
         run: cargo build --release --features cli --target aarch64-apple-darwin
@@ -400,7 +452,7 @@ jobs:
   difftest:
     name: differential-tests
     needs: [quality]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -414,8 +466,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-
 
       - name: Build release binary
         run: cargo build --release --features cli
@@ -428,8 +480,8 @@ jobs:
 
   release:
     name: publish-release
-    needs: [build-windows, build-windows-arm64, build-linux, build-macos, difftest]
-    runs-on: ubuntu-latest
+    needs: [build-windows, build-windows-arm64, build-linux, build-linux-arm64, build-macos, difftest]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
