@@ -4,6 +4,19 @@ All notable changes to dpa are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Updated `base64` to 0.23, `ecb` to 0.2, and `libloading` to 0.9 after
+  workspace-wide compatibility checks.
+
+### Security
+
+- Updated `crypto-bigint` to 0.7.10 and `ctutils` to 0.4.6 for
+  RUSTSEC-2026-0387 and RUSTSEC-2026-0385. CI now checks advisories through
+  the audited `deny.toml` policy.
+
 ## [1.0.0-rc2] - 2026-10-28
 
 ### Added

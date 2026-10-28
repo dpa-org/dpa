@@ -36,9 +36,9 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 aes = "0.8"
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 cbc = { version = "0.1", features = ["alloc"] }
-ecb = { version = "0.1", features = ["alloc"] }
+ecb = { version = "0.2", features = ["alloc"] }
 flate2 = "1"
 hex = "0.4"
 hmac = "0.12"
@@ -93,7 +93,7 @@ python = ["dep:pyo3"]
 clap = "4"
 # Shell completion generation (`dpa --generate-completion <shell>`).
 clap_complete = "4"
-libloading = "0.8"
+libloading = "0.9"
 rayon = "1.10"
 walkdir = "2"
 # bzip2 (libbz2 C bindings - host-only, see compress.rs cfg gate)

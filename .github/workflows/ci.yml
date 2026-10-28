@@ -52,13 +52,13 @@ jobs:
       - name: i18n key parity
         run: python3 scripts/check_i18n_keys.py
 
-      # Audit the dependency tree for known vulnerabilities. Requires
-      # cargo-audit to be installed (not part of the rust toolchain); CI
-      # installs it on demand. Run locally with: cargo install cargo-audit --locked
-      - name: cargo audit
+      # Use the repository's cargo-deny policy so explicitly reviewed and
+      # unreachable advisories stay registered in deny.toml rather than being
+      # duplicated in a separate audit configuration.
+      - name: cargo deny advisories
         run: |
-          cargo install cargo-audit --locked
-          cargo audit
+          cargo install cargo-deny --locked
+          cargo deny check advisories
 
       - name: package hygiene
         run: |
