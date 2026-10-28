@@ -93,7 +93,7 @@ python = ["dep:pyo3"]
 clap = "4"
 # Shell completion generation (`dpa --generate-completion <shell>`).
 clap_complete = "4"
-libloading = "0.8"
+libloading = "0.9"
 rayon = "1.10"
 walkdir = "2"
 # bzip2 (libbz2 C bindings - host-only, see compress.rs cfg gate)
