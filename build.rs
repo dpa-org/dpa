@@ -6,10 +6,15 @@
 // EXPORTS section are exported. The whitelist is intentionally EMPTY today.
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    println!(
-        "cargo:rustc-link-arg=/DEF:{}\\dpa.def",
-        manifest_dir.replace('/', "\\")
-    );
+    // `/DEF:` is an MSVC linker option. Sending it to GNU/lld linkers makes
+    // every non-Windows build of the cdylib fail, so gate it on the target.
+    let target = std::env::var("TARGET").unwrap_or_default();
+    if target.ends_with("-windows-msvc") {
+        println!(
+            "cargo:rustc-link-arg=/DEF:{}\\dpa.def",
+            manifest_dir.replace('/', "\\")
+        );
+    }
     println!("cargo:rerun-if-changed=dpa.def");
 
     // Embed the git commit (and its date) for `dpa --version`
