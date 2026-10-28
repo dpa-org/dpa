@@ -37,6 +37,11 @@ jobs:
       - name: test
         run: cargo test --workspace
 
+      - name: cargo deny advisories
+        run: |
+          cargo install cargo-deny --locked
+          cargo deny check advisories
+
       - name: package hygiene
         run: |
           cargo package --allow-dirty --list > /tmp/pkg_list.txt
