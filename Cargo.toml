@@ -36,7 +36,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 aes = "0.8"
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 cbc = { version = "0.1", features = ["alloc"] }
 ecb = { version = "0.1", features = ["alloc"] }
 flate2 = "1"
