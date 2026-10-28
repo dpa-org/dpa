@@ -79,7 +79,7 @@ A `kind` containing a sub-path (`url:decode`, `to:date`, `to:pem`) yields
 `Variant`; everything else defaults to `Primary`. `Shortcut` is always marked
 explicitly at the registration site.
 
-`Op` is currently `{ name, category, family, kind, level, description, args,
+`Op` is `{ name, category, family, kind, level, description, args,
 run, stream }`. `dpa list` prints Category / Family / Kind / Op / Description;
 `dpa ops <name>` prints the family, kind, and level. Run `dpa list` for the
 current counts.
@@ -140,8 +140,8 @@ any other tool, and it is recorded when the operation is added:
 | Supporting | Narrower operations that still need to work, such as `de:bruijn`, `prime`, `hotp`, `totp` | Correct and usable; parameter depth is not pursued |
 | Out of scope | Operations unrelated to the tool's purpose | Not implemented, and not promised in the docs |
 
-The tier for a new operation is decided before implementation, so effort goes to
-the operations that carry flows rather than to surface coverage.
+Operations are tiered so that effort goes to the operations that carry flows
+rather than to surface coverage.
 
 ## 7. Adding an argument
 

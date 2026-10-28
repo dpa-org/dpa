@@ -1,7 +1,7 @@
 //! Hash ops: MD5 / SHA-1 / SHA-224 / SHA-256 / SHA-384 / SHA-512 / SM3 /
 //! SHA3-256 / SHA3-512 / BLAKE2b-256 / BLAKE2b-512 / RIPEMD-160 / CRC-32 / CRC-32C.
 //!
-//! Design note: ops output raw digest bytes (not hex strings) to stay composable —
+//! Design note: ops output raw digest bytes (not hex strings) to stay composable -
 //! chain a `dpa:hex:encode` step to display, Unix-pipeline style.
 
 use std::collections::HashMap;
@@ -14,16 +14,16 @@ use ripemd::{Ripemd128, Ripemd160, Ripemd256, Ripemd320};
 use sha1::Sha1;
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512};
 use sha3::digest::{ExtendableOutput, XofReader};
-use sha3::{Keccak224, Keccak256, Keccak384, Keccak512, Sha3_256, Sha3_512, Shake128, Shake256};
+use sha3::{
+    Keccak224, Keccak256, Keccak384, Keccak512, Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128,
+    Shake256,
+};
 use sm3::Sm3;
 use whirlpool::Whirlpool;
 
+use super::crypto::opt_arg;
 use super::{ArgSpec, Op, StreamingOp};
 use crate::i18n;
-
-fn opt_arg<'a>(args: &'a HashMap<String, String>, name: &str, default: &'a str) -> &'a str {
-    args.get(name).map(String::as_str).unwrap_or(default)
-}
 
 pub fn ops() -> Vec<Op> {
     vec![
@@ -122,6 +122,22 @@ pub fn ops() -> Vec<Op> {
             make_hash_sha3_256
         ),
         stream_op!(
+            "dpa:sha3:224",
+            "hash",
+            "op.sha3.224.desc",
+            &[],
+            hash_sha3_224,
+            make_hash_sha3_224
+        ),
+        stream_op!(
+            "dpa:sha3:384",
+            "hash",
+            "op.sha3.384.desc",
+            &[],
+            hash_sha3_384,
+            make_hash_sha3_384
+        ),
+        stream_op!(
             "dpa:sha3:512",
             "hash",
             "op.sha3.512.desc",
@@ -181,7 +197,12 @@ pub fn ops() -> Vec<Op> {
             "dpa:xxhash32",
             "hash",
             "op.xxhash32.desc",
-            &[],
+            &[ArgSpec {
+                name: "seed",
+                required: false,
+                description: "op.xxhash32.arg.seed",
+                format: crate::ops::ArgFormat::Utf8,
+            }],
             hash_xxhash32,
             make_hash_xxhash32
         ),
@@ -189,7 +210,12 @@ pub fn ops() -> Vec<Op> {
             "dpa:xxhash64",
             "hash",
             "op.xxhash64.desc",
-            &[],
+            &[ArgSpec {
+                name: "seed",
+                required: false,
+                description: "op.xxhash64.arg.seed",
+                format: crate::ops::ArgFormat::Utf8,
+            }],
             hash_xxhash64,
             make_hash_xxhash64
         ),
@@ -402,6 +428,12 @@ fn make_hash_sm3(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn Strea
 fn make_hash_sha3_256(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
     make_hash::<Sha3_256>()(args)
 }
+fn make_hash_sha3_224(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
+    make_hash::<Sha3_224>()(args)
+}
+fn make_hash_sha3_384(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
+    make_hash::<Sha3_384>()(args)
+}
 fn make_hash_sha3_512(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
     make_hash::<Sha3_512>()(args)
 }
@@ -599,6 +631,14 @@ fn hash_sha3_256(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Resul
     Ok(digest::<Sha3_256>(input))
 }
 
+fn hash_sha3_224(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    Ok(digest::<Sha3_224>(input))
+}
+
+fn hash_sha3_384(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    Ok(digest::<Sha3_384>(input))
+}
+
 fn hash_sha3_512(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     Ok(digest::<Sha3_512>(input))
 }
@@ -663,18 +703,46 @@ fn hash_md4(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec
 /// LzmaBufferStream precedent for algorithms without a digest trait impl.
 struct Xxh32Stream {
     buf: Vec<u8>,
+    seed: u32,
 }
 
 struct Xxh64Stream {
     buf: Vec<u8>,
+    seed: u64,
 }
 
-fn make_hash_xxhash32(_args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
-    Ok(Box::new(Xxh32Stream { buf: Vec::new() }))
+fn parse_seed_u32(args: &HashMap<String, String>) -> anyhow::Result<u32> {
+    match args.get("seed") {
+        None => Ok(0),
+        Some(s) => s
+            .parse::<u32>()
+            .map_err(|_| anyhow::anyhow!("invalid xxhash32 seed: {s} (u32)")),
+    }
 }
 
-fn make_hash_xxhash64(_args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
-    Ok(Box::new(Xxh64Stream { buf: Vec::new() }))
+fn parse_seed_u64(args: &HashMap<String, String>) -> anyhow::Result<u64> {
+    match args.get("seed") {
+        None => Ok(0),
+        Some(s) => s
+            .parse::<u64>()
+            .map_err(|_| anyhow::anyhow!("invalid xxhash64 seed: {s} (u64)")),
+    }
+}
+
+fn make_hash_xxhash32(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
+    let seed = parse_seed_u32(args)?;
+    Ok(Box::new(Xxh32Stream {
+        buf: Vec::new(),
+        seed,
+    }))
+}
+
+fn make_hash_xxhash64(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
+    let seed = parse_seed_u64(args)?;
+    Ok(Box::new(Xxh64Stream {
+        buf: Vec::new(),
+        seed,
+    }))
 }
 
 impl StreamingOp for Xxh32Stream {
@@ -684,7 +752,7 @@ impl StreamingOp for Xxh32Stream {
     }
 
     fn finish(&mut self) -> anyhow::Result<Vec<u8>> {
-        Ok(xxh32(&self.buf).to_le_bytes().to_vec())
+        Ok(xxh32(&self.buf, self.seed).to_be_bytes().to_vec())
     }
 }
 
@@ -695,16 +763,18 @@ impl StreamingOp for Xxh64Stream {
     }
 
     fn finish(&mut self) -> anyhow::Result<Vec<u8>> {
-        Ok(xxh64(&self.buf).to_le_bytes().to_vec())
+        Ok(xxh64(&self.buf, self.seed).to_be_bytes().to_vec())
     }
 }
 
-fn hash_xxhash32(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    Ok(xxh32(input).to_le_bytes().to_vec())
+fn hash_xxhash32(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let seed = parse_seed_u32(args)?;
+    Ok(xxh32(input, seed).to_be_bytes().to_vec())
 }
 
-fn hash_xxhash64(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    Ok(xxh64(input).to_le_bytes().to_vec())
+fn hash_xxhash64(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let seed = parse_seed_u64(args)?;
+    Ok(xxh64(input, seed).to_be_bytes().to_vec())
 }
 
 const PRIME32_1: u32 = 0x9E37_79B1;
@@ -721,15 +791,15 @@ fn xxh32_round(acc: u32, input: u32) -> u32 {
     rotl32(acc.wrapping_add(input.wrapping_mul(PRIME32_2)), 13).wrapping_mul(PRIME32_1)
 }
 
-fn xxh32(input: &[u8]) -> u32 {
+fn xxh32(input: &[u8], seed: u32) -> u32 {
     let len = input.len() as u32;
     let mut p = 0usize;
     let mut h: u32;
     if input.len() >= 16 {
-        let mut v1 = PRIME32_1.wrapping_add(PRIME32_2);
-        let mut v2 = PRIME32_2;
-        let mut v3 = 0u32;
-        let mut v4 = 0u32.wrapping_sub(PRIME32_1);
+        let mut v1 = PRIME32_1.wrapping_add(PRIME32_2).wrapping_add(seed);
+        let mut v2 = PRIME32_2.wrapping_add(seed);
+        let mut v3 = seed;
+        let mut v4 = seed.wrapping_sub(PRIME32_1);
         while p + 16 <= input.len() {
             v1 = xxh32_round(v1, u32::from_le_bytes(input[p..p + 4].try_into().unwrap()));
             v2 = xxh32_round(
@@ -751,7 +821,7 @@ fn xxh32(input: &[u8]) -> u32 {
             .wrapping_add(rotl32(v3, 12))
             .wrapping_add(rotl32(v4, 18));
     } else {
-        h = PRIME32_5;
+        h = seed.wrapping_add(PRIME32_5);
     }
     h = h.wrapping_add(len);
     while p + 4 <= input.len() {
@@ -795,15 +865,15 @@ fn xxh64_merge_round(acc: u64, val: u64) -> u64 {
     acc.wrapping_mul(PRIME64_1).wrapping_add(PRIME64_4)
 }
 
-fn xxh64(input: &[u8]) -> u64 {
+fn xxh64(input: &[u8], seed: u64) -> u64 {
     let len = input.len() as u64;
     let mut p = 0usize;
     let mut h: u64;
     if input.len() >= 32 {
-        let mut v1 = PRIME64_1.wrapping_add(PRIME64_2);
-        let mut v2 = PRIME64_2;
-        let mut v3 = 0u64;
-        let mut v4 = 0u64.wrapping_sub(PRIME64_1);
+        let mut v1 = PRIME64_1.wrapping_add(PRIME64_2).wrapping_add(seed);
+        let mut v2 = PRIME64_2.wrapping_add(seed);
+        let mut v3 = seed;
+        let mut v4 = seed.wrapping_sub(PRIME64_1);
         while p + 32 <= input.len() {
             v1 = xxh64_round(v1, u64::from_le_bytes(input[p..p + 8].try_into().unwrap()));
             v2 = xxh64_round(
@@ -829,7 +899,7 @@ fn xxh64(input: &[u8]) -> u64 {
         h = xxh64_merge_round(h, v3);
         h = xxh64_merge_round(h, v4);
     } else {
-        h = PRIME64_5;
+        h = seed.wrapping_add(PRIME64_5);
     }
     h = h.wrapping_add(len);
     while p + 8 <= input.len() {
@@ -843,7 +913,9 @@ fn xxh64(input: &[u8]) -> u64 {
     if p + 4 <= input.len() {
         let w = u32::from_le_bytes(input[p..p + 4].try_into().unwrap()) as u64;
         h ^= w.wrapping_mul(PRIME64_1);
-        h = rotl64(h, 23).wrapping_mul(PRIME64_2);
+        h = rotl64(h, 23)
+            .wrapping_mul(PRIME64_2)
+            .wrapping_add(PRIME64_3);
         p += 4;
     }
     while p < input.len() {
@@ -1549,7 +1621,7 @@ fn hash_nt(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<
     Ok(md4_digest(&utf16le).to_vec())
 }
 
-/// MD4 (RFC 1320) — minimal in-house one-shot implementation used by the NT
+/// MD4 (RFC 1320) - minimal in-house one-shot implementation used by the NT
 /// hash op. Kept dependency-free: the RustCrypto `md-4` crate is not available
 /// on the configured registry mirror, and NT hash only needs a single digest.
 fn md4_digest(data: &[u8]) -> [u8; 16] {
@@ -1572,9 +1644,9 @@ fn md4_digest(data: &[u8]) -> [u8; 16] {
     }
     msg.extend_from_slice(&bit_len.to_le_bytes());
 
-    for chunk in msg.chunks_exact(64) {
+    for chunk in msg.as_chunks::<64>().0 {
         let mut x = [0u32; 16];
-        for (i, w) in chunk.chunks_exact(4).enumerate() {
+        for (i, w) in chunk.as_chunks::<4>().0.iter().enumerate() {
             x[i] = u32::from_le_bytes([w[0], w[1], w[2], w[3]]);
         }
         let (mut a, mut b, mut c, mut d) = (a0, b0, c0, d0);
@@ -1863,7 +1935,7 @@ fn ssdeep_levenshtein(a: &str, b: &str) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// ssdeep (CTPH) fuzzy hash — a clean-room re-implementation of the libfuzzy
+// ssdeep (CTPH) fuzzy hash - a clean-room re-implementation of the libfuzzy
 // (ssdeep 2.14+) engine so that produced signatures match `ssdeep` CLI output
 // byte for byte. Algorithm highlights:
 //   * A 7-byte-window rolling hash (h1 + h2 Adler-style sums plus a
@@ -1987,7 +2059,7 @@ fn ssdeep_digest(data: &[u8]) -> Vec<u8> {
         if h & rollmask != 0 {
             continue;
         }
-        if horg % SSDEEP_MIN_BLOCKSIZE != 0 {
+        if !horg.is_multiple_of(SSDEEP_MIN_BLOCKSIZE) {
             continue;
         }
         h >>= bhstart;
@@ -2327,15 +2399,16 @@ mod tests {
 
     #[test]
     fn xxhash_known_vectors() {
-        // Official xxHash sanity vectors (seed 0), output little-endian.
-        assert_eq!(hex_of(hash_xxhash32, b""), "055dcc02"); // 0x02CC5D05
-        assert_eq!(hex_of(hash_xxhash32, b"abc"), "ff53d132"); // 0x32D153FF
-        assert_eq!(hex_of(hash_xxhash64, b""), "99e9d85137db46ef"); // 0xEF46DB3751D8E999
-        assert_eq!(hex_of(hash_xxhash64, b"abc"), "990977adf52cbc44"); // 0x44BC2CF5AD770999
+        // Official xxHash sanity vectors (seed 0), output big-endian to match
+        // xxhsum and Python's xxhash module.
+        assert_eq!(hex_of(hash_xxhash32, b""), "02cc5d05"); // 0x02CC5D05
+        assert_eq!(hex_of(hash_xxhash32, b"abc"), "32d153ff"); // 0x32D153FF
+        assert_eq!(hex_of(hash_xxhash64, b""), "ef46db3751d8e999"); // 0xEF46DB3751D8E999
+        assert_eq!(hex_of(hash_xxhash64, b"abc"), "44bc2cf5ad770999"); // 0x44BC2CF5AD770999
         // Long input (>32 bytes) exercises the striped main loop.
         let long: Vec<u8> = (0..=255u8).cycle().take(1024).collect();
-        assert_eq!(hex_of(hash_xxhash32, &long), "5a4d6558"); // 0x58654D5A
-        assert_eq!(hex_of(hash_xxhash64, &long), "57dfe48ff114396f"); // 0x6F3914F18FE4DF57
+        assert_eq!(hex_of(hash_xxhash32, &long), "58654d5a"); // 0x58654D5A
+        assert_eq!(hex_of(hash_xxhash64, &long), "6f3914f18fe4df57"); // 0x6F3914F18FE4DF57
     }
 
     #[test]

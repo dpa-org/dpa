@@ -3,7 +3,7 @@
 //! (`process_bytes_stream`), verifying identical output.
 //!
 //! `cargo test` does not build the plugin cdylib, so this test needs
-//! `cargo build -p dpa-plugin-demo` first — CI runs that before the test step.
+//! `cargo build -p dpa-plugin-demo` first - CI runs that before the test step.
 //! Without the artifact the test is skipped locally (with a notice) and fails
 //! when `CI` is set, so a missing build step cannot pass silently in CI.
 
@@ -84,20 +84,22 @@ fn plugin_registration_and_execution() {
 
     let f = rot_flow();
     let expect: Vec<u8> = b"HELLO".iter().map(|b| b.wrapping_add(13)).collect();
+    let cfg = engine::EngineConfig::default();
 
     // In-memory path (calls the plugin's run bridge).
-    let mem = engine::process_bytes(&f, b"HELLO", flow::OutputFormat::Raw).expect("memory path ok");
+    let mem =
+        engine::process_bytes(&f, b"HELLO", flow::OutputFormat::Raw, &cfg).expect("memory path ok");
     assert_eq!(mem, expect, "memory run should wrap-add 13 to 'HELLO'");
 
     // Streaming path (calls the plugin's stream init/write/finish bridges).
-    let st = engine::process_bytes_stream(&f, b"HELLO", flow::OutputFormat::Raw)
+    let st = engine::process_bytes_stream(&f, b"HELLO", flow::OutputFormat::Raw, &cfg)
         .expect("stream path ok");
     assert_eq!(st, expect, "stream run should wrap-add 13 to 'HELLO'");
 
     // Chunked streaming: 1 MiB forces several internal chunks.
     let big: Vec<u8> = (0..(1 << 20)).map(|i| (i % 251) as u8).collect();
-    let st_big =
-        engine::process_bytes_stream(&f, &big, flow::OutputFormat::Raw).expect("big stream ok");
+    let st_big = engine::process_bytes_stream(&f, &big, flow::OutputFormat::Raw, &cfg)
+        .expect("big stream ok");
     assert_eq!(
         st_big.len(),
         big.len(),

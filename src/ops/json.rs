@@ -221,8 +221,8 @@ fn json_get(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<
         .ok_or_else(|| anyhow::anyhow!("{}", i18n::t("err.missing_path")))?;
     let v = parse(input)?;
     let cur = walk(&v, path)?;
-    let s = if cur.is_string() {
-        cur.as_str().unwrap().to_string()
+    let s = if let Some(s) = cur.as_str() {
+        s.to_string()
     } else {
         serde_json::to_string(cur)?
     };
@@ -431,7 +431,9 @@ mod tests {
             s
         );
         let back = json_minify(s.as_bytes(), &HashMap::new()).unwrap();
-        // serde_json sorts object keys; compare semantically, not byte-wise
+        // serde_json is built with preserve_order, so object key order
+        // from the input is kept through pretty/minify; compare semantically
+        // (order-independent equality) as before.
         let v1: Value = serde_json::from_slice(input).unwrap();
         let v2: Value = serde_json::from_slice(&back).unwrap();
         assert_eq!(v1, v2);
@@ -622,6 +624,60 @@ mod tests {
         let mut a = HashMap::new();
         a.insert("path".into(), "[1]".into());
         assert_eq!(json_get(br#"["a","b"]"#, &a).unwrap(), b"b");
+    }
+
+    #[test]
+    fn csv_to_json_preserves_header_order() {
+        // Dict-mode output keeps the CSV header column order. With the
+        // default (BTreeMap-backed) serde_json Map this used to alphabetize
+        // to "alpha,mike,zeta"; preserve_order pins the first-seen order.
+        let input = b"zeta,alpha,mike\n1,2,3\n";
+        let out = csv_to_json(input, &HashMap::new()).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        let z = s.find("zeta").expect("zeta header present");
+        let a = s.find("alpha").expect("alpha header present");
+        let m = s.find("mike").expect("mike header present");
+        assert!(z < a && a < m, "header order lost: {}", s);
+        // Same for the array-of-arrays format (header row is the first row).
+        let mut f = HashMap::new();
+        f.insert("format".to_string(), "array".to_string());
+        let out2 = csv_to_json(b"zeta,alpha\na,b\n", &f).unwrap();
+        let s2 = String::from_utf8(out2).unwrap();
+        assert!(
+            s2.find("zeta").unwrap() < s2.find("alpha").unwrap(),
+            "array format header order lost: {}",
+            s2
+        );
+    }
+
+    #[test]
+    fn json_to_csv_preserves_object_key_order() {
+        // parse() keeps input key order, so json_to_csv's union of keys
+        // follows first-seen order instead of the previous alphabetical order
+        // (the doc comment above json_to_csv always claimed first-seen).
+        let input = br#"[{"z":1,"a":2},{"b":3}]"#;
+        let out = json_to_csv(input, &HashMap::new()).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        let rows: Vec<&str> = s.trim_end().split('\n').collect();
+        assert_eq!(rows[0], "z,a,b");
+        assert_eq!(rows[1].trim_end(), "1,2,");
+        assert_eq!(rows[2].trim_end(), ",,3");
+    }
+
+    #[test]
+    fn pretty_preserves_input_key_order() {
+        // With preserve_order, pretty/minify round-trips keep the input
+        // object key order byte-for-byte instead of alphabetizing it.
+        let input = br#"{"zeta":1,"alpha":2}"#;
+        let pretty = json_pretty(input, &HashMap::new()).unwrap();
+        let s = String::from_utf8(pretty).unwrap();
+        assert!(
+            s.find("zeta").unwrap() < s.find("alpha").unwrap(),
+            "pretty key order lost: {}",
+            s
+        );
+        let min = json_minify(input, &HashMap::new()).unwrap();
+        assert_eq!(min, br#"{"zeta":1,"alpha":2}"#);
     }
 
     #[test]

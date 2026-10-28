@@ -107,10 +107,10 @@ fn builtin_pattern(name: &str) -> Option<&'static str> {
 fn resolve_pattern(
     args: &HashMap<String, String>,
 ) -> anyhow::Result<std::borrow::Cow<'static, str>> {
-    if let Some(p) = args.get("pattern") {
-        if !p.trim().is_empty() {
-            return Ok(std::borrow::Cow::Owned(p.clone()));
-        }
+    if let Some(p) = args.get("pattern")
+        && !p.trim().is_empty()
+    {
+        return Ok(std::borrow::Cow::Owned(p.clone()));
     }
     if let Some(b) = args.get("builtin") {
         if let Some(t) = builtin_pattern(b.trim()) {

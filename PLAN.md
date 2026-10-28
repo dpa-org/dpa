@@ -3,8 +3,7 @@
 [简体中文](PLAN.zh-CN.md) | English
 
 This document records what dpa is, what it deliberately leaves out, and where it
-is going. It is a working document: the direction can change as the tool is
-used. Implementation rules live in [OPERATION_CONTRACT.md](OPERATION_CONTRACT.md),
+is going. Implementation rules live in [OPERATION_CONTRACT.md](OPERATION_CONTRACT.md),
 the plugin interface in [docs/PLUGIN.md](docs/PLUGIN.md), and released changes in
 [CHANGELOG.md](CHANGELOG.md).
 
@@ -67,7 +66,7 @@ Out of scope:
   meaningful, a streaming path. The engine handles flow parsing, input
   expansion, parallelism, message localization, and the type check between
   consecutive steps.
-- **CLI** (the `dpa-cli` binary, installed as `dpa`): `run`, `list`, `ops`, and
+- **CLI** (the `dpa` binary): `run`, `list`, `ops`, and
   `recipe convert`.
 - **Bindings**: the `dpa-wasm` crate for wasm32 and optional pyo3 bindings for
   Python. Both call the same engine, so behavior cannot drift between targets.

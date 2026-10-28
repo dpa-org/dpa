@@ -7,16 +7,34 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList};
 
 use crate::engine;
-use crate::flow::{Flow, OutputFormat};
+use crate::flow::{Flow, OutputFormat, from_yaml};
 use crate::i18n;
 use crate::ops;
+
+/// Upper bound for a flow YAML document passed through the Python bindings
+/// (8 MiB). Mirrors the CLI-side `MAX_FLOW_YAML_BYTES` in engine.rs so the
+/// Python in-memory parse cannot bypass the engine cap.
+const MAX_FLOW_YAML_BYTES: usize = 8 * 1024 * 1024;
+/// Upper bound for an input file read by `run_file` (1 GiB). Mirrors the
+/// engine's derived-key material bound so the in-memory whole-file path can
+/// never silently exhaust memory.
+const MAX_INPUT_BYTES: u64 = 1 << 30;
 
 fn py_err(e: anyhow::Error) -> PyErr {
     PyRuntimeError::new_err(format!("{:#}", e))
 }
 
 fn parse_flow(yaml_text: &str) -> PyResult<Flow> {
-    let flow: Flow = serde_yaml::from_str(yaml_text).map_err(|e| {
+    if yaml_text.len() > MAX_FLOW_YAML_BYTES {
+        return Err(PyValueError::new_err(i18n::tf(
+            "err.flow_too_large",
+            &[
+                yaml_text.len().to_string().as_str(),
+                MAX_FLOW_YAML_BYTES.to_string().as_str(),
+            ],
+        )));
+    }
+    let flow: Flow = from_yaml(yaml_text).map_err(|e| {
         PyValueError::new_err(i18n::tf("err.parse_flow_failed", &[e.to_string().as_str()]))
     })?;
     if flow.steps.is_empty() {
@@ -41,11 +59,15 @@ fn resolve_fmt(flow: &Flow, output_format: Option<&str>) -> PyResult<OutputForma
 fn run(flow_yaml: &str, data: &[u8], output_format: Option<&str>) -> PyResult<Py<PyBytes>> {
     let flow = parse_flow(flow_yaml)?;
     let fmt = resolve_fmt(&flow, output_format)?;
-    let out = engine::process_bytes_stream(&flow, data, fmt).map_err(py_err)?;
+    let out = engine::process_bytes_stream(&flow, data, fmt, &engine::EngineConfig::default())
+        .map_err(py_err)?;
     Ok(Python::with_gil(|py| PyBytes::new(py, &out).into()))
 }
 
 /// Run flows in memory in batch: `dpa.run_batch(flow_yaml, items, output_format=None) -> list[bytes]`.
+/// Items are processed **sequentially** in input order; parallel execution is
+/// intentionally deferred until the EngineConfig migration lands, so no
+/// ordering or thread-affinity guarantee exists beyond FIFO completion today.
 #[pyfunction]
 #[pyo3(signature = (flow_yaml, items, output_format=None))]
 fn run_batch(
@@ -62,8 +84,10 @@ fn run_batch(
     let mut first_err: Option<PyErr> = None;
     for item in items {
         let res = Python::with_gil(|py| {
-            py.detach()
-                .allow_threads(|| engine::process_bytes_stream(&flow, &item, fmt).map_err(py_err))
+            py.allow_threads(|| {
+                engine::process_bytes_stream(&flow, &item, fmt, &engine::EngineConfig::default())
+                    .map_err(py_err)
+            })
         });
         match res {
             Ok(out) => outs.push(Python::with_gil(|py| PyBytes::new(py, &out).into())),
@@ -100,20 +124,47 @@ fn run_file(
     output_format: Option<&str>,
 ) -> PyResult<Option<Py<PyBytes>>> {
     let yaml_text = std::fs::read_to_string(flow_path).map_err(|e| {
-        PyRuntimeError::new_err(i18n::tf("err.read_flow_failed", &[e.to_string().as_str()]))
+        PyRuntimeError::new_err(i18n::tf(
+            "err.read_flow_failed",
+            &[flow_path, i18n::os_error(&e).as_str()],
+        ))
     })?;
     let flow = parse_flow(&yaml_text)?;
     let fmt = resolve_fmt(&flow, output_format)?;
+    let input_len = std::fs::metadata(input_path).map(|m| m.len()).unwrap_or(0);
+    if input_len > MAX_INPUT_BYTES {
+        return Err(PyRuntimeError::new_err(i18n::tf(
+            "err.input_too_large",
+            &[
+                input_len.to_string().as_str(),
+                MAX_INPUT_BYTES.to_string().as_str(),
+            ],
+        )));
+    }
     let data = std::fs::read(input_path).map_err(|e| {
-        PyRuntimeError::new_err(i18n::tf("err.read_input_failed", &[e.to_string().as_str()]))
+        PyRuntimeError::new_err(i18n::tf(
+            "err.read_input_failed",
+            &[input_path, i18n::os_error(&e).as_str()],
+        ))
     })?;
-    let out = engine::process_bytes_stream(&flow, &data, fmt).map_err(py_err)?;
+    let out = engine::process_bytes_stream(&flow, &data, fmt, &engine::EngineConfig::default())
+        .map_err(py_err)?;
     match output_path {
         Some(p) => {
-            std::fs::write(p, &out).map_err(|e| {
+            // Atomic output: reuse the engine's tmp+commit path so an
+            // interrupted run never leaves a half-written file at `p`
+            // (see the engine's atomic-write contract).
+            let mut of = engine::open_file_writer(p).map_err(py_err)?;
+            of.writer_mut().write_all(&out).map_err(|e| {
                 PyRuntimeError::new_err(i18n::tf(
                     "err.write_outfile_failed",
-                    &[e.to_string().as_str()],
+                    &[i18n::os_error(&e).as_str()],
+                ))
+            })?;
+            of.commit().map_err(|e| {
+                PyRuntimeError::new_err(i18n::tf(
+                    "err.write_outfile_failed",
+                    &[i18n::os_error(&e).as_str()],
                 ))
             })?;
             Ok(None)
@@ -143,7 +194,7 @@ fn list_ops(category: Option<&str>) -> PyResult<Vec<Py<PyDict>>> {
             let args = PyList::empty(py);
             for a in o.args {
                 let ad = PyDict::new(py);
-                ad.set_item("name", a.name.as_str())?;
+                ad.set_item("name", a.name)?;
                 ad.set_item("required", a.required)?;
                 ad.set_item("description", i18n::t_str(&a.description))?;
                 args.append(ad)?;
@@ -167,7 +218,7 @@ fn op(name: &str) -> PyResult<Option<Py<PyDict>>> {
             let args = PyList::empty(py);
             for a in o.args {
                 let ad = PyDict::new(py);
-                ad.set_item("name", a.name.as_str())?;
+                ad.set_item("name", a.name)?;
                 ad.set_item("required", a.required)?;
                 ad.set_item("description", i18n::t_str(&a.description))?;
                 args.append(ad)?;

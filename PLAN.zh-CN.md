@@ -2,8 +2,7 @@
 
 [English](PLAN.md) | 简体中文
 
-本文档记录 dpa 是什么、有意不做什么、以及打算往哪走。它是一份工作文档：
-方向会随实际使用调整。实现层面的规矩见 [OPERATION_CONTRACT.md](OPERATION_CONTRACT.zh-CN.md)，
+本文档记录 dpa 是什么、有意不做什么、以及打算往哪走。实现层面的规矩见 [OPERATION_CONTRACT.md](OPERATION_CONTRACT.zh-CN.md)，
 插件接口见 [docs/PLUGIN.md](docs/PLUGIN.zh-CN.md)，已发布的变化见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 1. dpa 是什么
@@ -52,7 +51,7 @@ dpa 是一个命令行工具，用于多步的数据变换与分析。它的工�
 - **核心引擎**（`dpa` crate）：统一接口背后的操作注册表。每个操作提供整块处理路径，
   并在有意义时提供流式路径。引擎负责流程解析、输入展开、并行、消息本地化，以及相邻
   步骤之间的类型检查。
-- **CLI**（`dpa-cli` 二进制，安装为 `dpa`）：`run`、`list`、`ops`、`recipe convert`。
+- **CLI**（`dpa` 二进制）：`run`、`list`、`ops`、`recipe convert`。
 - **绑定**：wasm32 用 `dpa-wasm`，Python 用可选的 pyo3 绑定。两者调用同一引擎，
   行为不会在各目标间漂移。
 - **插件**：供主 crate 之外构建的操作使用的一套小型 C ABI。

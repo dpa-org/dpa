@@ -75,19 +75,19 @@ pub fn ops() -> Vec<Op> {
                     name: "rot_lower",
                     required: false,
                     description: "op.rot13.arg.rot_lower",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "rot_upper",
                     required: false,
                     description: "op.rot13.arg.rot_upper",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "rot_numeric",
                     required: false,
                     description: "op.rot13.arg.rot_numeric",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             rot13
@@ -218,7 +218,7 @@ pub fn ops() -> Vec<Op> {
                     name: "display_count",
                     required: false,
                     description: "op.unique.arg.display_count",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             unique_bytes
@@ -227,12 +227,20 @@ pub fn ops() -> Vec<Op> {
             "dpa:count",
             "transform",
             "op.count.desc",
-            &[ArgSpec {
-                name: "sub",
-                required: true,
-                description: "op.count.arg.sub",
-                format: crate::ops::ArgFormat::Utf8,
-            },],
+            &[
+                ArgSpec {
+                    name: "mode",
+                    required: false,
+                    description: "op.count.arg.mode",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "sub",
+                    required: false,
+                    description: "op.count.arg.sub",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+            ],
             count_sub
         ),
         op!(
@@ -256,7 +264,7 @@ pub fn ops() -> Vec<Op> {
                     name: "per_line",
                     required: false,
                     description: "op.take.bytes.arg.per_line",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             take_bytes
@@ -282,7 +290,7 @@ pub fn ops() -> Vec<Op> {
                     name: "per_line",
                     required: false,
                     description: "op.drop.bytes.arg.per_line",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             drop_bytes
@@ -323,13 +331,13 @@ pub fn ops() -> Vec<Op> {
                     name: "regex",
                     required: false,
                     description: "op.filter.arg.regex",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "invert",
                     required: false,
                     description: "op.filter.arg.invert",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             filter_lines
@@ -404,7 +412,7 @@ pub fn ops() -> Vec<Op> {
             ],
             defang_url
         ),
-        // Fork — flow control. The engine intercepts this op
+        // Fork - flow control. The engine intercepts this op
         // (see crate::engine): remaining steps run independently on each segment.
         op!(
             "dpa:fork",
@@ -418,7 +426,7 @@ pub fn ops() -> Vec<Op> {
             },],
             fork_identity
         ),
-        // bitwise family (AND/OR use a cyclic key; NOT and XOR already exist)
+        // bitwise family (AND/OR/XOR use a cyclic key; NOT is byte-wise)
         stream_op!(
             "dpa:bitwise:and",
             "transform",
@@ -444,6 +452,19 @@ pub fn ops() -> Vec<Op> {
             },],
             bitwise_or,
             make_bitwise_or_stream
+        ),
+        stream_op!(
+            "dpa:bitwise:xor",
+            "transform",
+            "op.bitwise.xor.desc",
+            &[ArgSpec {
+                name: "key",
+                required: true,
+                description: "op.bitwise.xor.arg.key",
+                format: crate::ops::ArgFormat::Utf8,
+            },],
+            bitwise_xor,
+            make_bitwise_xor_stream
         ),
         stream_op!(
             "dpa:bitwise:shift-left",
@@ -494,7 +515,7 @@ pub fn ops() -> Vec<Op> {
                     name: "carry",
                     required: false,
                     description: "op.bitwise.rotate-left.arg.carry",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             bitwise_rotate_left,
@@ -515,7 +536,7 @@ pub fn ops() -> Vec<Op> {
                     name: "carry",
                     required: false,
                     description: "op.bitwise.rotate-right.arg.carry",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             bitwise_rotate_right,
@@ -606,6 +627,8 @@ pub fn ops() -> Vec<Op> {
         op!(
             "dpa:add:line-numbers",
             "transform",
+            "transform",
+            "line-numbers",
             "op.add.line_numbers.desc",
             &[
                 ArgSpec {
@@ -644,7 +667,7 @@ pub fn ops() -> Vec<Op> {
                     name: "ignore_case",
                     required: false,
                     description: "op.substitute.arg.ignore_case",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             substitute
@@ -1461,7 +1484,21 @@ mod tests {
 
     #[test]
     fn sort_unique_bytes() {
-        assert_eq!(sort_bytes(b"caba", &HashMap::new()).unwrap(), b"aabc");
+        // default alpha sorts lines lexically, output newline-terminated
+        assert_eq!(sort_bytes(b"caba", &HashMap::new()).unwrap(), b"caba\n");
+        assert_eq!(
+            sort_bytes(b"pear\napple\n", &HashMap::new()).unwrap(),
+            b"apple\npear\n"
+        );
+        // explicit bytes keeps raw byte-value order (historical default)
+        assert_eq!(
+            sort_bytes(
+                b"caba",
+                &HashMap::from([("type".to_string(), "bytes".to_string())])
+            )
+            .unwrap(),
+            b"aabc"
+        );
         assert_eq!(sort_bytes(b"", &HashMap::new()).unwrap(), b"");
         assert_eq!(unique_bytes(b"caba", &HashMap::new()).unwrap(), b"cab");
         assert_eq!(unique_bytes(b"", &HashMap::new()).unwrap(), b"");
@@ -1474,6 +1511,19 @@ mod tests {
         assert_eq!(count_sub(b"ababxab", &a).unwrap(), b"3");
         assert_eq!(count_sub(b"aaa", &a).unwrap(), b"0");
         assert!(count_sub(b"x", &HashMap::new()).is_err());
+        // line-counting mode
+        let mut l = HashMap::new();
+        l.insert("mode".to_string(), "lines".to_string());
+        assert_eq!(count_sub(b"a\nb\nc\n", &l).unwrap(), b"3");
+        assert_eq!(count_sub(b"a\nb\nc", &l).unwrap(), b"3");
+        assert_eq!(count_sub(b"", &l).unwrap(), b"0");
+        assert!(
+            count_sub(
+                b"x",
+                &HashMap::from([("mode".to_string(), "bad".to_string())])
+            )
+            .is_err()
+        );
 
         let mut n = HashMap::new();
         n.insert("n".to_string(), "3".to_string());
@@ -1489,7 +1539,7 @@ mod tests {
     fn split_by_delim_segments() {
         let mut a = HashMap::new();
         a.insert("delimiter".to_string(), ",".to_string());
-        assert_eq!(split_by_delim(b"a,b,c", &a).unwrap(), b"a\nb\nc\n");
+        assert_eq!(split_by_delim(b"a,b,c", &a).unwrap(), b"a\nb\nc");
         assert_eq!(split_by_delim(b"", &a).unwrap(), b"");
         assert!(split_by_delim(b"x", &HashMap::new()).is_err());
         a.insert("delimiter".to_string(), "".to_string());
@@ -1752,10 +1802,23 @@ fn vigenere_decode(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
 fn sort_bytes(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     let sort_type = args.get("type").map(|s| s.as_str()).unwrap_or("alpha");
     match sort_type {
-        "alpha" => {
+        // Explicit byte-value ordering (the historical default behaviour).
+        "bytes" => {
             let mut v = input.to_vec();
             v.sort_unstable();
             Ok(v)
+        }
+        // Line-oriented lexical sort (alpha, default).
+        "alpha" => {
+            let text = String::from_utf8_lossy(input);
+            let mut lines: Vec<&str> = text.lines().collect();
+            lines.sort_unstable();
+            let mut out = Vec::with_capacity(input.len());
+            for l in lines {
+                out.extend_from_slice(l.as_bytes());
+                out.push(b'\n');
+            }
+            Ok(out)
         }
         "ip" | "numeric" | "length" => {
             let text = String::from_utf8_lossy(input);
@@ -1777,7 +1840,7 @@ fn sort_bytes(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Ve
             }
             Ok(out)
         }
-        other => anyhow::bail!("invalid sort type: {other} (alpha|ip|numeric|length)"),
+        other => anyhow::bail!("invalid sort type: {other} (alpha|bytes|ip|numeric|length)"),
     }
 }
 
@@ -1833,25 +1896,36 @@ fn unique_bytes(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<
 }
 
 fn count_sub(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    let sub = args
-        .get("sub")
-        .ok_or_else(|| anyhow::anyhow!("{}", i18n::tf("err.missing_sub", &[])))?
-        .as_bytes()
-        .to_vec();
-    if sub.is_empty() {
-        anyhow::bail!("{}", i18n::tf("err.empty_sub", &[]));
-    }
-    let mut count = 0usize;
-    let mut i = 0usize;
-    while i + sub.len() <= input.len() {
-        if &input[i..i + sub.len()] == sub.as_slice() {
-            count += 1;
-            i += sub.len();
-        } else {
-            i += 1;
+    let mode = args.get("mode").map(|s| s.as_str()).unwrap_or("sub");
+    match mode {
+        // Count input lines (one per output line, trailing newline ignored).
+        "lines" => {
+            let text = String::from_utf8_lossy(input);
+            Ok(text.lines().count().to_string().into_bytes())
         }
+        "sub" => {
+            let sub = args
+                .get("sub")
+                .ok_or_else(|| anyhow::anyhow!("{}", i18n::tf("err.missing_sub", &[])))?
+                .as_bytes()
+                .to_vec();
+            if sub.is_empty() {
+                anyhow::bail!("{}", i18n::tf("err.empty_sub", &[]));
+            }
+            let mut count = 0usize;
+            let mut i = 0usize;
+            while i + sub.len() <= input.len() {
+                if &input[i..i + sub.len()] == sub.as_slice() {
+                    count += 1;
+                    i += sub.len();
+                } else {
+                    i += 1;
+                }
+            }
+            Ok(count.to_string().into_bytes())
+        }
+        other => anyhow::bail!("invalid count mode: {other} (sub|lines)"),
     }
-    Ok(count.to_string().into_bytes())
 }
 
 fn parse_n(args: &HashMap<String, String>) -> anyhow::Result<usize> {
@@ -1943,9 +2017,13 @@ fn split_by_delim(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resul
         .unwrap_or_else(|| "\n".to_string());
     let text = String::from_utf8_lossy(input);
     let mut out = Vec::with_capacity(text.len() + text.matches(delim.as_str()).count() + 1);
+    let mut first = true;
     for seg in text.split(delim.as_str()) {
+        if !first {
+            out.extend_from_slice(join.as_bytes());
+        }
         out.extend_from_slice(seg.as_bytes());
-        out.extend_from_slice(join.as_bytes());
+        first = false;
     }
     Ok(out)
 }
@@ -2165,6 +2243,18 @@ fn bitwise_or(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Ve
         .collect())
 }
 
+fn bitwise_xor(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let key = args.get("key").map(|s| s.as_bytes()).unwrap_or(&[]);
+    if key.is_empty() {
+        anyhow::bail!("key must not be empty");
+    }
+    Ok(input
+        .iter()
+        .enumerate()
+        .map(|(i, b)| b ^ key[i % key.len()])
+        .collect())
+}
+
 /// Shared streaming constructor for AND/OR: holds the key and current index.
 struct AndStream {
     key: Vec<u8>,
@@ -2197,6 +2287,22 @@ fn make_bitwise_or_stream(args: &HashMap<String, String>) -> anyhow::Result<Box<
     Ok(Box::new(OrStream { key, idx: 0 }))
 }
 
+fn make_bitwise_xor_stream(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
+    let key = args
+        .get("key")
+        .map(|s| s.as_bytes().to_vec())
+        .unwrap_or_default();
+    if key.is_empty() {
+        anyhow::bail!("key must not be empty");
+    }
+    Ok(Box::new(XorStream { key, idx: 0 }))
+}
+
+struct XorStream {
+    key: Vec<u8>,
+    idx: usize,
+}
+
 impl StreamingOp for AndStream {
     fn write(&mut self, chunk: &[u8]) -> anyhow::Result<Vec<u8>> {
         let out: Vec<u8> = chunk
@@ -2219,6 +2325,22 @@ impl StreamingOp for OrStream {
             .iter()
             .enumerate()
             .map(|(i, b)| b | self.key[(self.idx + i) % self.key.len()])
+            .collect();
+        self.idx = (self.idx + chunk.len()) % self.key.len();
+        Ok(out)
+    }
+
+    fn finish(&mut self) -> anyhow::Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+}
+
+impl StreamingOp for XorStream {
+    fn write(&mut self, chunk: &[u8]) -> anyhow::Result<Vec<u8>> {
+        let out: Vec<u8> = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, b)| b ^ self.key[(self.idx + i) % self.key.len()])
             .collect();
         self.idx = (self.idx + chunk.len()) % self.key.len();
         Ok(out)
@@ -2538,6 +2660,24 @@ mod tests_bitwise_and_sets {
     }
 
     #[test]
+    fn bitwise_xor_cyclic() {
+        // 0x61^0x41=0x20, 0x62^0x41=0x23, 0x63^0x41=0x22
+        assert_eq!(run(bitwise_xor, "abc", &[("key", "A")]), " #\"");
+        // cyclic key across whole input, and xor-with-same-key round-trips
+        // (expected bytes = "Hello, dpa!" XOR "secret" cycled)
+        let m: HashMap<String, String> = HashMap::from([("key".to_string(), "secret".to_string())]);
+        let first = bitwise_xor(b"Hello, dpa!", &m).unwrap();
+        assert_eq!(
+            first,
+            vec![
+                0x3B, 0x00, 0x0F, 0x1E, 0x0A, 0x58, 0x53, 0x01, 0x13, 0x13, 0x44
+            ]
+        );
+        assert_eq!(bitwise_xor(&first, &m).unwrap(), b"Hello, dpa!");
+        assert!(bitwise_xor(b"x", &HashMap::new()).is_err());
+    }
+
+    #[test]
     fn shift_left_right() {
         // 0x01 << 3 = 0x08
         assert_eq!(
@@ -2582,9 +2722,10 @@ mod tests_bitwise_and_sets {
     fn stream_equals_memory_p1_4() {
         type Mk = fn(&HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>>;
         type Mem = fn(&[u8], &HashMap<String, String>) -> anyhow::Result<Vec<u8>>;
-        let cases: [(Mk, Mem, &[(&str, &str)]); 6] = [
+        let cases: [(Mk, Mem, &[(&str, &str)]); 7] = [
             (make_bitwise_and_stream, bitwise_and, &[("key", "secret")]),
             (make_bitwise_or_stream, bitwise_or, &[("key", "key")]),
+            (make_bitwise_xor_stream, bitwise_xor, &[("key", "xor")]),
             (make_shift_left_stream, bitwise_shift_left, &[("bits", "2")]),
             (
                 make_shift_right_stream,
@@ -2675,7 +2816,11 @@ mod tests_bitwise_and_sets {
 
     #[test]
     fn sort_types() {
-        assert_eq!(run(sort_bytes, "cab", &[]), "abc");
+        // alpha (default) sorts whole lines lexically, newline-terminated
+        assert_eq!(run(sort_bytes, "cab", &[]), "cab\n");
+        assert_eq!(run(sort_bytes, "pear\napple\n", &[]), "apple\npear\n");
+        // explicit bytes keeps raw byte-value order
+        assert_eq!(run(sort_bytes, "cab", &[("type", "bytes")]), "abc");
         assert_eq!(
             run(sort_bytes, "10\n2\n1\n", &[("type", "numeric")]),
             "1\n2\n10\n"
@@ -2745,7 +2890,7 @@ mod tests_bitwise_and_sets {
     fn split_join() {
         assert_eq!(
             run(split_by_delim, "a,b,c", &[("delimiter", ",")]),
-            "a\nb\nc\n"
+            "a\nb\nc"
         );
         assert_eq!(
             run(
@@ -2753,7 +2898,7 @@ mod tests_bitwise_and_sets {
                 "a,b,c",
                 &[("delimiter", ","), ("join", "|")]
             ),
-            "a|b|c|"
+            "a|b|c"
         );
     }
 

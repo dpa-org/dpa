@@ -1,16 +1,16 @@
 //! Minimal zero-dependency i18n for user-facing strings.
 //!
 //! All user-facing strings move out of source into FTL-style
-//! resource files (`i18n/en.ftl`, `i18n/zh-CN.ftl`) embedded at compile time
+//! resource files (`i18n/en/*.ftl`, `i18n/zh-CN/*.ftl`) embedded at compile time
 //! via [`include_str!`]. This file keeps only the loading + lookup logic.
-//! A new language = a new resource file + one registration line in
+//! A new language = a new resource directory + one registration list in
 //! [`zh_table`]/[`en_table`] (and the domain coverage test).
-//! Op/arg descriptions are keyized — the registry stores structured keys
+//! Op/arg descriptions are keyized - the registry stores structured keys
 //! (`op.<name>.desc`, `op.<name>.arg.<argname>`) instead of English text, and
 //! both `en` and `zh` tables carry translations for them.
 //!
-//! Resource format (see `i18n/*.ftl`): one `key = value` per line, grouped by
-//! `# --- section ---` comments (err / msg / cli / op_descs / arg_descs).
+//! Resource format (see `i18n/*/*.ftl`): one `key = value` per line, grouped by
+//! file per key family (common / ops-<category>).
 //! Only two escapes are honored when decoding a value: `\\` -> `\`, `\n` ->
 //! newline (enough for single-line values with embedded line breaks).
 //!
@@ -58,10 +58,10 @@ pub fn detect_lang() -> u8 {
             return LANG_EN;
         }
     }
-    if let Ok(v) = std::env::var("LANG") {
-        if v.to_ascii_lowercase().starts_with("zh") {
-            return LANG_ZH;
-        }
+    if let Ok(v) = std::env::var("LANG")
+        && v.to_ascii_lowercase().starts_with("zh")
+    {
+        return LANG_ZH;
     }
     LANG_EN
 }
@@ -98,13 +98,39 @@ pub fn domain(key: &str) -> Domain {
 }
 
 // ---------------------------------------------------------------------------
-// Resource loading (include_str! + simple key=value parsing, zero dependencies)
+// Resource loading (include_str! directory merge, zero dependencies)
 // ---------------------------------------------------------------------------
+// Resources live in `i18n/en/*.ftl` and `i18n/zh-CN/*.ftl`, one file per key
+// family (common.ftl for err/msg/cli keys, ops-<category>.ftl for op/arg
+// keys). The loader merges all files of the active language into one table.
+// Keep the lists below in sync with the directory contents - the CI script
+// `scripts/check_i18n_keys.py` asserts the exact same file set.
 
-/// English resource file (embedded at compile time).
-const EN_FTL: &str = include_str!("../i18n/en.ftl");
-/// Simplified Chinese resource file (embedded at compile time).
-const ZH_FTL: &str = include_str!("../i18n/zh-CN.ftl");
+/// English resource files (embedded at compile time, merged in order).
+const EN_FILES: &[&str] = &[
+    include_str!("../i18n/en/common.ftl"),
+    include_str!("../i18n/en/ops-analyze.ftl"),
+    include_str!("../i18n/en/ops-codec.ftl"),
+    include_str!("../i18n/en/ops-crypto.ftl"),
+    include_str!("../i18n/en/ops-extract.ftl"),
+    include_str!("../i18n/en/ops-generate.ftl"),
+    include_str!("../i18n/en/ops-hash.ftl"),
+    include_str!("../i18n/en/ops-misc.ftl"),
+    include_str!("../i18n/en/ops-transform.ftl"),
+];
+
+/// Simplified Chinese resource files (embedded at compile time, merged in order).
+const ZH_FILES: &[&str] = &[
+    include_str!("../i18n/zh-CN/common.ftl"),
+    include_str!("../i18n/zh-CN/ops-analyze.ftl"),
+    include_str!("../i18n/zh-CN/ops-codec.ftl"),
+    include_str!("../i18n/zh-CN/ops-crypto.ftl"),
+    include_str!("../i18n/zh-CN/ops-extract.ftl"),
+    include_str!("../i18n/zh-CN/ops-generate.ftl"),
+    include_str!("../i18n/zh-CN/ops-hash.ftl"),
+    include_str!("../i18n/zh-CN/ops-misc.ftl"),
+    include_str!("../i18n/zh-CN/ops-transform.ftl"),
+];
 
 /// Decode the two escapes used in `.ftl` values: `\\` and `\n`.
 fn decode_value(raw: &str) -> String {
@@ -129,29 +155,31 @@ fn decode_value(raw: &str) -> String {
     out
 }
 
-/// Parse one resource file into a static lookup table.
-fn build_table(src: &'static str) -> HashMap<&'static str, &'static str> {
+/// Merge several resource files into one lookup table.
+fn build_table(files: &'static [&'static str]) -> HashMap<&'static str, &'static str> {
     let mut table = HashMap::new();
-    for line in src.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+    for src in files {
+        for line in src.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            // Separator is the first " = " (space-equals-space): keys such as
+            // op descriptions may legitimately contain '=' (e.g. "a <=> b"),
+            // so a bare '=' split would truncate them. Values may contain " = ".
+            let Some((key, val)) = line.split_once(" = ") else {
+                continue;
+            };
+            let key = key.trim();
+            if key.is_empty() {
+                continue;
+            }
+            // Values are decoded once at first use and leaked as 'static strings
+            // (one-time process startup cost; keeps t() returning &'static str).
+            let decoded = decode_value(val.trim());
+            let leaked: &'static str = Box::leak(decoded.into_boxed_str());
+            table.insert(key, leaked);
         }
-        // Separator is the first " = " (space-equals-space): keys such as
-        // op descriptions may legitimately contain '=' (e.g. "a <=> b"),
-        // so a bare '=' split would truncate them. Values may contain " = ".
-        let Some((key, val)) = line.split_once(" = ") else {
-            continue;
-        };
-        let key = key.trim();
-        if key.is_empty() {
-            continue;
-        }
-        // Values are decoded once at first use and leaked as 'static strings
-        // (one-time process startup cost; keeps t() returning &'static str).
-        let decoded = decode_value(val.trim());
-        let leaked: &'static str = Box::leak(decoded.into_boxed_str());
-        table.insert(key, leaked);
     }
     table
 }
@@ -159,13 +187,13 @@ fn build_table(src: &'static str) -> HashMap<&'static str, &'static str> {
 /// English lookup table (built lazily, once).
 fn en_table() -> &'static HashMap<&'static str, &'static str> {
     static TABLE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    TABLE.get_or_init(|| build_table(EN_FTL))
+    TABLE.get_or_init(|| build_table(EN_FILES))
 }
 
 /// Simplified Chinese lookup table (built lazily, once).
 fn zh_table() -> &'static HashMap<&'static str, &'static str> {
     static TABLE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    TABLE.get_or_init(|| build_table(ZH_FTL))
+    TABLE.get_or_init(|| build_table(ZH_FILES))
 }
 
 /// English lookup.
@@ -225,7 +253,7 @@ pub fn t_str(key: &str) -> String {
 ///
 /// If the number of `{}` placeholders does not match the number of arguments,
 /// returns an explicit error text instead of silently truncating/leaving
-/// placeholders (review fix: tf() no longer swallows i18n argument mismatches).
+/// placeholders (tf() never swallows i18n argument mismatches).
 pub fn tf(key: &'static str, args: &[&str]) -> String {
     let template = t(key);
     let placeholders = template.matches("{}").count();
@@ -257,6 +285,27 @@ pub fn tf(key: &'static str, args: &[&str]) -> String {
     out
 }
 
+/// Localize an OS error without leaking the system-locale message.
+/// The error *kind* is mapped to dpa's own en/zh-CN i18n text and the numeric
+/// OS code is appended, so error output no longer depends on the machine's
+/// locale: a Chinese and an English machine produce the same text
+/// (stable for scripts/screenshots).
+pub fn os_error(e: &std::io::Error) -> String {
+    let code = e
+        .raw_os_error()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "?".to_string());
+    let key = match e.kind() {
+        std::io::ErrorKind::NotFound => "err.os.file_not_found",
+        std::io::ErrorKind::PermissionDenied => "err.os.permission_denied",
+        std::io::ErrorKind::AlreadyExists => "err.os.already_exists",
+        std::io::ErrorKind::InvalidInput => "err.os.invalid_input",
+        std::io::ErrorKind::UnexpectedEof => "err.os.unexpected_eof",
+        _ => "err.os.other",
+    };
+    tf(key, &[code.as_str()])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +317,8 @@ mod tests {
     const EN_SHORT_KEYS: &[&str] = &[
         "err.read_flow_failed",
         "err.parse_flow_failed",
+        "err.flow_too_large",
+        "err.flow_schema_unsupported",
         "err.empty_steps",
         "msg.flow_meta",
         "msg.flow_name",
@@ -430,6 +481,8 @@ mod tests {
         "err.bytes_not_num",
         "err.bytes_range",
         "err.unknown_unit",
+        "err.number_invalid",
+        "err.flow_dup_arg",
         "err.not_unix_time",
         "err.not_filetime",
         "err.missing_pattern",
@@ -475,6 +528,8 @@ mod tests {
         "cli.output_format_help",
         "cli.recursive_help",
         "cli.jobs_help",
+        "cli.batch_separator_help",
+        "cli.batch_label_help",
         "cli.list_about",
         "cli.category_help_prefix",
         "cli.op_about",
@@ -515,7 +570,7 @@ mod tests {
     }
 
     /// Resource coverage: the zh-CN file must carry EXACTLY the same
-    /// short-key set (err./msg./cli.) as en.ftl — no missing keys, no extras —
+    /// short-key set (err./msg./cli.) as en.ftl - no missing keys, no extras -
     /// otherwise a missing translation would silently fall back to English.
     #[test]
     fn zh_short_key_set_matches_en() {
@@ -589,7 +644,7 @@ mod tests {
 
     #[test]
     fn op_description_uniqueness() {
-        // Review fix: identical op descriptions would make it impossible to
+        // Identical op descriptions would make it impossible to
         // tell which translation context a key belongs to, so they must stay unique.
         let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
         for op in ops::all_ops() {

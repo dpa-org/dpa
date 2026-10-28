@@ -1,0 +1,6 @@
+# Toolchain pinning for reproducible local/CI builds.
+# - channel stays "stable"; bump intentionally and note it in CHANGELOG.
+# - The minimum supported Rust version (MSRV) is declared in Cargo.toml
+#   (`rust-version = "1.89"`); this file locks the compiler *family* only.
+[toolchain]
+channel = "stable"

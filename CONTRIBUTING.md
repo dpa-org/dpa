@@ -17,7 +17,7 @@ Issues and pull requests are welcome.
 ## Build and test
 
 ```bash
-cargo build --release          # binary: target/release/dpa-cli(.exe)
+cargo build --release          # binary: target/release/dpa(.exe)
 cargo test --workspace
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings

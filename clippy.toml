@@ -1,0 +1,4 @@
+# Clippy configuration (thresholds only; lint levels stay in CI, -D warnings).
+# Values are conservative so the workspace stays warning-free.
+too-many-arguments-threshold = 8
+type-complexity-threshold = 250

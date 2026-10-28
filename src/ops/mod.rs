@@ -20,10 +20,11 @@ macro_rules! op {
             category: $category.to_string(),
             family: $family.to_string(),
             kind: $kind.to_string(),
-            level: $crate::ops::derive_level($name, &$category, &$family, &$kind),
+            level: $crate::ops::derive_level(&$kind),
             input: $crate::ops::OpIO::Unspecified,
             output: $crate::ops::OpIO::Unspecified,
             description: $desc.to_string(),
+            example: None,
             args: $args,
             run: Box::new($run),
             stream: None,
@@ -36,14 +37,12 @@ macro_rules! op {
             family: $crate::ops::derive_family_kind(&$name, &$category).0,
             kind: $crate::ops::derive_family_kind(&$name, &$category).1,
             level: $crate::ops::derive_level(
-                &$name,
-                &$category,
-                &$crate::ops::derive_family_kind(&$name, &$category).0,
                 &$crate::ops::derive_family_kind(&$name, &$category).1,
             ),
             input: $crate::ops::OpIO::Unspecified,
             output: $crate::ops::OpIO::Unspecified,
             description: $desc.to_string(),
+            example: None,
             args: $args,
             run: Box::new($run),
             stream: None,
@@ -62,10 +61,11 @@ macro_rules! stream_op {
             category: $category.to_string(),
             family: $family.to_string(),
             kind: $kind.to_string(),
-            level: $crate::ops::derive_level($name, &$category, &$family, &$kind),
+            level: $crate::ops::derive_level(&$kind),
             input: $crate::ops::OpIO::Unspecified,
             output: $crate::ops::OpIO::Unspecified,
             description: $desc.to_string(),
+            example: None,
             args: $args,
             run: Box::new($run),
             stream: Some(Box::new($make)),
@@ -78,14 +78,12 @@ macro_rules! stream_op {
             family: $crate::ops::derive_family_kind(&$name, &$category).0,
             kind: $crate::ops::derive_family_kind(&$name, &$category).1,
             level: $crate::ops::derive_level(
-                &$name,
-                &$category,
-                &$crate::ops::derive_family_kind(&$name, &$category).0,
                 &$crate::ops::derive_family_kind(&$name, &$category).1,
             ),
             input: $crate::ops::OpIO::Unspecified,
             output: $crate::ops::OpIO::Unspecified,
             description: $desc.to_string(),
+            example: None,
             args: $args,
             run: Box::new($run),
             stream: Some(Box::new($make)),
@@ -99,6 +97,7 @@ pub mod codec;
 pub mod compress;
 pub mod crypto;
 pub mod datetime;
+pub mod gcm;
 pub mod hash;
 pub mod json;
 pub mod protocol;
@@ -109,6 +108,8 @@ pub mod regex;
 pub mod transform;
 
 use std::collections::HashMap;
+
+use crate::i18n;
 
 /// Parameter value format: explicit replacement for the implicit
 /// `'0x..'` magic prefix. `Utf8` is the default and matches historical
@@ -183,11 +184,29 @@ pub fn parse_bool(s: &str) -> anyhow::Result<bool> {
     }
 }
 
-/// Parse a signed integer literal.
+/// Parse a signed integer literal. Accepts decimal by default, plus explicit
+/// radix prefixes `0x`/`0o`/`0b` (case-insensitive, optional leading `-`).
+/// This is the numeric-op path: only numeric arguments accept the
+/// prefixes; hex codec ops keep their own no-strip input semantics.
 pub fn parse_number(s: &str) -> anyhow::Result<i64> {
-    s.trim()
-        .parse::<i64>()
-        .map_err(|e| anyhow::anyhow!("invalid number value: {e}"))
+    let t = s.trim();
+    let (neg, body) = match t.strip_prefix('-') {
+        Some(r) => (true, r),
+        None => (false, t),
+    };
+    let (radix, digits) =
+        if let Some(h) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
+            (16, h)
+        } else if let Some(o) = body.strip_prefix("0o").or_else(|| body.strip_prefix("0O")) {
+            (8, o)
+        } else if let Some(b) = body.strip_prefix("0b").or_else(|| body.strip_prefix("0B")) {
+            (2, b)
+        } else {
+            (10, body)
+        };
+    let v = i64::from_str_radix(digits, radix)
+        .map_err(|e| anyhow::anyhow!("{}", i18n::tf("err.number_invalid", &[s, &e.to_string()])))?;
+    Ok(if neg { -v } else { v })
 }
 
 /// Base64-decode a string (standard alphabet, padding required).
@@ -295,6 +314,9 @@ pub struct Op {
     /// Declared output data shape; see [`Op::input`].
     pub output: OpIO,
     pub description: String,
+    /// Optional i18n example key (`op.<name>.example`); rendered by `show_op`
+    /// as an `Examples:` section when set.
+    pub example: Option<&'static str>,
     pub args: &'static [ArgSpec],
     /// Run function: input bytes + args -> output bytes (in-memory whole-buffer path).
     /// Boxed (not a bare fn) so plugin ops can capture their loaded FFI pointers.
@@ -361,13 +383,16 @@ impl OpIO {
     }
 }
 
-/// Derive the granularity level from an op id when a registration macro is used
-/// without an explicit level. Rule: a kind containing a `:` sub-path (such as
-/// `base64:url:decode`'s `url:decode`, `timestamp:to:date`'s `to:date`) is a
-/// Variant; everything else defaults to Primary. Shortcuts are composite by
-/// design and are marked explicitly at registration (e.g. `random:hex`).
-pub fn derive_level(name: &str, _category: &str, _family: &str, kind: &str) -> OpLevel {
-    let _ = name;
+/// Derive the granularity level from an op kind when a registration macro is
+/// used without an explicit level. Rule: a kind containing a `:` sub-path
+/// (such as `base64:url:decode`'s `url:decode`, `timestamp:to:date`'s
+/// `to:date`) is a Variant; everything else defaults to Primary. Shortcuts are
+/// composite by design and are marked explicitly at registration (e.g.
+/// `random:hex`).
+///
+/// The previous four-argument signature only consumed `kind`;
+/// the unused `name`/`category`/`family` parameters were dropped.
+pub fn derive_level(kind: &str) -> OpLevel {
     if kind.contains(':') {
         OpLevel::Variant
     } else {
@@ -394,6 +419,10 @@ pub fn derive_family_kind(name: &str, category: &str) -> (String, String) {
     }
 }
 
+// The CLI presentation helpers (arg_alias / arg_short /
+// arg_visible_aliases) moved to `crate::cli` so the core op domain model
+// stays free of presentation-layer concerns.
+
 /// All built-in ops. Append a line here when adding an op module.
 pub fn builtin_ops() -> Vec<Op> {
     let mut ops = Vec::new();
@@ -413,7 +442,49 @@ pub fn builtin_ops() -> Vec<Op> {
     ops.extend(regex::ops());
     apply_io_declarations(&mut ops);
     apply_shortcut_marks(&mut ops);
+    apply_examples(&mut ops);
     ops
+}
+
+/// Central `Examples:` annotations. High-frequency and multi-argument
+/// ops (parameter count >= 2) get an `op.<name>.example`
+/// i18n key here - one source of truth, resolved via `i18n::t` at help-render
+/// time, so en/zh-CN share the same key and the registration macros stay clean.
+/// Keep this list in sync with the matching keys in `i18n/en/common.ftl` and
+/// `i18n/zh-CN/common.ftl`.
+fn apply_examples(ops: &mut [Op]) {
+    let examples: &[(&str, &str)] = &[
+        ("dpa:sort", "op.sort.example"),
+        ("dpa:unique", "op.unique.example"),
+        ("dpa:count", "op.count.example"),
+        ("dpa:replace", "op.replace.example"),
+        ("dpa:aes:encrypt", "op.aes.encrypt.example"),
+        ("dpa:aes:decrypt", "op.aes.decrypt.example"),
+        ("dpa:hmac", "op.hmac.example"),
+        ("dpa:base64:encode", "op.base64.encode.example"),
+        ("dpa:base64:decode", "op.base64.decode.example"),
+        ("dpa:hex:encode", "op.hex.encode.example"),
+        ("dpa:hex:decode", "op.hex.decode.example"),
+        ("dpa:url:encode", "op.url.encode.example"),
+        ("dpa:timestamp:to:date", "op.timestamp.to.date.example"),
+        ("dpa:json:to-yaml", "op.json.to.yaml.example"),
+        ("dpa:yaml:to-json", "op.yaml.to.json.example"),
+        ("dpa:json:to-csv", "op.json.to.csv.example"),
+        ("dpa:csv:to-json", "op.csv.to.json.example"),
+        ("dpa:json:pretty", "op.json.pretty.example"),
+        ("dpa:md5", "op.md5.example"),
+        ("dpa:sha256", "op.sha256.example"),
+        ("dpa:uuid", "op.uuid.example"),
+        ("dpa:random:hex", "op.random.hex.example"),
+        ("dpa:gzip:compress", "op.gzip.compress.example"),
+    ];
+    for (name, key) in examples {
+        for op in ops.iter_mut() {
+            if op.name == *name {
+                op.example = Some(key);
+            }
+        }
+    }
 }
 
 /// Central shortcut marks: op chains composed of two or more primitives get
@@ -432,12 +503,12 @@ fn apply_shortcut_marks(ops: &mut [Op]) {
                 | "dpa:timestamp:to:date"
                 | "dpa:filetime:to:date"
                 // pubkey format composites.
-                | "dpa:pem:to:hex"
                 | "dpa:pem:to:jwk"
                 | "dpa:jwk:to:pem"
-                | "dpa:hex:to:pem"
                 | "dpa:pkcs1:to:pkcs8"
                 | "dpa:pkcs8:to:pkcs1"
+                // sm2 format composite: private key -> SPKI public key PEM.
+                | "dpa:sm2:pubkey:extract"
         ) {
             op.level = OpLevel::Shortcut;
         }
@@ -468,15 +539,16 @@ fn apply_io_declarations(ops: &mut [Op]) {
     // ── random / generators ───────────────────────────────────────────────
     set(ops, "dpa:random", Unspecified, Raw);
     set(ops, "dpa:random:hex", Unspecified, Hex);
+    set(ops, "dpa:uuid", Unspecified, Utf8);
     set(ops, "dpa:uuid4", Unspecified, Utf8);
     set(ops, "dpa:timestamp", Unspecified, Utf8);
     set(ops, "dpa:timestamp:to:date", Utf8, Utf8);
     set(ops, "dpa:filetime", Unspecified, Utf8);
+    set(ops, "dpa:filetime:from:unix", Utf8, Utf8);
     set(ops, "dpa:filetime:to:date", Utf8, Utf8);
     set(ops, "dpa:de:bruijn", Unspecified, Utf8);
     set(ops, "dpa:hotp", Unspecified, Utf8);
     set(ops, "dpa:totp", Unspecified, Utf8);
-    set(ops, "dpa:lorem:ipsum", Unspecified, Utf8);
     set(ops, "dpa:prime", Unspecified, Utf8);
     // ── hex / base64 boundary (text encodings) ────────────────────────────
     set(ops, "dpa:hex:encode", Raw, Hex);
@@ -533,7 +605,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
     set(ops, "dpa:json:get", Json, Utf8);
     set(ops, "dpa:json:to-csv", Json, Utf8);
     set(ops, "dpa:csv:to-json", Utf8, Json);
-    // ── hash: raw bytes in, hex digest out ────────────────────────────────
+    // ── hash: raw bytes in, raw digest out ────────────────────────────────
     for h in [
         "adler32",
         "blake2b:256",
@@ -557,7 +629,9 @@ fn apply_io_declarations(ops: &mut [Op]) {
         "sha224",
         "sha256",
         "sha384",
+        "sha3:224",
         "sha3:256",
+        "sha3:384",
         "sha3:512",
         "sha512",
         "shake",
@@ -566,7 +640,10 @@ fn apply_io_declarations(ops: &mut [Op]) {
         "xxhash32",
         "xxhash64",
     ] {
-        set(ops, &format!("dpa:{h}"), Raw, Hex);
+        // Hash ops emit raw digest bytes, so the IO type must
+        // be Raw (Hex was wrong: it made stdout rendering treat the digest as
+        // text and append a trailing newline, corrupting the byte stream).
+        set(ops, &format!("dpa:{h}"), Raw, Raw);
     }
     // fuzzy hashes emit text; luhn works on digit text.
     set(ops, "dpa:ssdeep", Raw, Utf8);
@@ -590,6 +667,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
         "des3:decrypt",
         "sm4:encrypt",
         "sm4:decrypt",
+        "sm4:mac",
         "rc4",
         "tea:encode",
         "tea:decode",
@@ -669,6 +747,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
         "bitwise:rotate-right",
         "bitwise:shift-left",
         "bitwise:shift-right",
+        "bitwise:xor",
         "byteswap",
         "drop:bytes",
         "remove:null",
@@ -685,10 +764,8 @@ fn apply_io_declarations(ops: &mut [Op]) {
     // ── pubkey: textual key formats ───────────────────────────────────────
     for k in [
         "pem",
-        "pem:to:hex",
         "pem:to:jwk",
         "jwk:to:pem",
-        "hex:to:pem",
         "pkcs1:to:pkcs8",
         "pkcs8:to:pkcs1",
         "asn1:parse",
@@ -698,6 +775,10 @@ fn apply_io_declarations(ops: &mut [Op]) {
         "x509",
         "ecdsa:verify",
         "rsa:verify",
+        "sm2:parse",
+        "sm2:pubkey:extract",
+        "sm2:key:parse",
+        "sm2:verify",
     ] {
         set(ops, &format!("dpa:{k}"), Utf8, Utf8);
     }
@@ -712,7 +793,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
     // `fork` is a control step (engine skips it) and stays Unspecified.
 }
 
-/// Process-wide op registry (review fix 3.2/3.4): built-ins plus loaded plugin
+/// Process-wide op registry: built-ins plus loaded plugin
 /// ops are materialized exactly once, then served by reference. `find_op` uses a
 /// name index (O(1)); no per-step reallocation, no per-call `Box::leak`.
 struct Registry {
@@ -761,7 +842,7 @@ pub fn all_ops() -> &'static [Op] {
 
 /// Find an op by name: built-ins first, then loaded plugin ops.
 ///
-/// Review fix A-7: accepts both the full namespaced ID (`dpa:aes:encrypt`) and
+/// Accepts both the full namespaced ID (`dpa:aes:encrypt`) and
 /// the display-layer short name (`aes:encrypt`, as printed by `dpa list`); a
 /// name without the `dpa:` prefix is auto-completed before lookup, so CLI
 /// output can be fed straight back into `dpa ops <name>` or flow references.
@@ -783,7 +864,7 @@ pub fn find_op(name: &str) -> Option<&'static Op> {
 mod tests {
     use super::*;
 
-    /// Review fix A-7: `dpa list` shows `aes:encrypt`-style short names; feeding
+    /// `dpa list` shows `aes:encrypt`-style short names; feeding
     /// them back into `dpa ops <name>` / flow references must resolve to the
     /// same op as the full `dpa:` namespaced id.
     #[test]
@@ -812,38 +893,45 @@ mod tests {
     #[test]
     fn derive_level_rules() {
         // Primary: no `:` sub-path in kind.
-        assert_eq!(
-            derive_level("dpa:aes:encrypt", "crypto", "aes", "encrypt"),
-            OpLevel::Primary
-        );
-        assert_eq!(
-            derive_level("dpa:base64:decode", "codec", "base64", "decode"),
-            OpLevel::Primary
-        );
+        assert_eq!(derive_level("encrypt"), OpLevel::Primary);
+        assert_eq!(derive_level("decode"), OpLevel::Primary);
         // Two-part id (no family segment) is also Primary.
-        assert_eq!(
-            derive_level("dpa:md5", "hash", "hash", "md5"),
-            OpLevel::Primary
-        );
+        assert_eq!(derive_level("md5"), OpLevel::Primary);
 
         // Variant: kind contains a `:` sub-path.
-        assert_eq!(
-            derive_level("dpa:base64:url:decode", "codec", "base64", "url:decode"),
-            OpLevel::Variant
-        );
-        assert_eq!(
-            derive_level("dpa:timestamp:to:date", "generate", "timestamp", "to:date"),
-            OpLevel::Variant
-        );
+        assert_eq!(derive_level("url:decode"), OpLevel::Variant);
+        assert_eq!(derive_level("to:date"), OpLevel::Variant);
 
         // Shortcut: marked explicitly at registration, not by derivation.
-        assert_eq!(
-            derive_level("dpa:random:hex", "generate", "random", "hex"),
-            OpLevel::Primary
-        );
+        assert_eq!(derive_level("hex"), OpLevel::Primary);
         let ops = crate::ops::builtin_ops();
         let rhex = ops.iter().find(|o| o.name == "dpa:random:hex").unwrap();
         assert_eq!(rhex.level, OpLevel::Shortcut);
         assert_eq!(rhex.level.display(), "shortcut");
+    }
+
+    /// Numeric-op argument parsing accepts explicit radix prefixes
+    /// (0x/0o/0b, case-insensitive, optional leading `-`) while the plain
+    /// decimal path is unchanged.
+    #[test]
+    fn parse_number_accepts_radix_prefixes() {
+        assert_eq!(parse_number("0x2A").unwrap(), 0x2A);
+        assert_eq!(parse_number("0X2a").unwrap(), 0x2A);
+        assert_eq!(parse_number("0o52").unwrap(), 0o52);
+        assert_eq!(parse_number("0O52").unwrap(), 0o52);
+        assert_eq!(parse_number("0b1010").unwrap(), 0b1010);
+        assert_eq!(parse_number("0B1010").unwrap(), 0b1010);
+        // Negative prefixed literals.
+        assert_eq!(parse_number("-0x2A").unwrap(), -0x2A);
+        assert_eq!(parse_number("-0b1010").unwrap(), -0b1010);
+        // Decimal unchanged (no prefix, plus sign tolerated via trim).
+        assert_eq!(parse_number("42").unwrap(), 42);
+        assert_eq!(parse_number(" -42 ").unwrap(), -42);
+        // Invalid digits still fail with the i18n error.
+        assert!(parse_number("0xZZ").is_err());
+        assert!(parse_number("0b102").is_err());
+        assert!(parse_number("0o8").is_err());
+        // Empty body after prefix fails too.
+        assert!(parse_number("0x").is_err());
     }
 }

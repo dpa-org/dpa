@@ -1,0 +1,69 @@
+# cargo-deny configuration for dpa.
+# Audit with:  cargo deny check
+# (advisories), cargo deny check licenses, cargo deny check bans, cargo deny check sources.
+#
+# The check is intentionally non-blocking for license edge cases: unknown
+# licenses are listed under `licenses.unlicensed` for review rather than
+# failing the build. Security advisories are hard failures.
+
+[advisories]
+version = 2
+# cargo-deny >= 0.20: security vulnerabilities are always hard failures
+# (no longer configurable via a lint level). `unsound`/`unmaintained` control
+# the dependency scope that is checked; `yanked` is a lint level.
+#
+# Direct dependency `rsa` has an unfixed advisory (CVE-2025-46124, review item
+# D3-暂缓); `cargo deny check` therefore reports a failure until the ecosystem
+# ships a fix. That is expected: it stays in scope (the advisory is surfaced in
+# output) rather than being ignored or hard-blocking every build.
+yanked = "warn"
+unsound = "all"
+unmaintained = "all"
+# When a security advisory is not yet fixed upstream, file an issue rather
+# than disabling this check wholesale. Ignore-list entries must carry a comment
+# with the issue/decision reference.
+#
+# N1 closure (2026-10-19): D3-暂缓 advisory RUSTSEC-2023-0071 is explicitly
+# not fixed; registered here with SECURITY.md references so
+# `cargo deny check advisories` passes while the decision stays auditable.
+# RUSTSEC-2024-0449 was closed on 2026-10-25: the serde-saphyr migration replaced
+# serde_yaml_ng / unsafe-libyaml, so the advisory no longer
+# applies to the dependency tree (see SECURITY.md「已迁移修复」).
+ignore = [
+    # RUSTSEC-2023-0071 (rsa 0.9.10, Marvin timing side channel): dpa uses rsa
+    # only for public-key parse/verify (no private-key ops, per Scope in
+    # SECURITY.md), so exposure is bounded; track upstream fix, re-evaluate on
+    # release. Decision: SECURITY.md / D3-暂缓.
+    "RUSTSEC-2023-0071",
+]
+
+[bans]
+# Multiple versions of the same crate: warn (review via `cargo tree -d`).
+multiple-versions = "warn"
+# Wildcard/empty version requirements break reproducibility.
+wildcards = "deny"
+
+[licenses]
+# cargo-deny >= 0.20: licenses are allow-list based; any license not in `allow`
+# is rejected. Unknown/unparsed licenses surface in the check output for
+# review rather than blocking (confidence-threshold controls text matching).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "CC0-1.0",
+    "Unlicense",
+    "MPL-2.0",
+    "OpenSSL",
+    "BlueOak-1.0.0",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+
+[sources]
+# crates.io is the only registry used by dpa.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

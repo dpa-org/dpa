@@ -1,0 +1,13 @@
+; dpa cdylib export whitelist.
+;
+; The dpa core library exposes no C ABI contract of its own: the plugin ABI
+; (dpa_plugin_*) lives inside plugin crates via the dpa_plugin! export macro,
+; and the host consumes plugins through libloading + an explicit symbol list.
+; Rust cdylibs only re-export #[no_mangle] / #[export_name] items, but C
+; libraries statically linked into the DLL (e.g. bzip2's bz_internal_error)
+; can still leak into the export table.
+;
+; An explicit /DEF: with an EMPTY EXPORTS section hides every symbol, keeping
+; the DLL export surface at zero. Any future dpa_ffi contract MUST be listed
+; here explicitly (and covered by tests/plugin_smoke.rs).
+EXPORTS

@@ -1,21 +1,34 @@
 //! dpa Web/WASM engine binding: reuses the Rust core engine on wasm32.
 //!
-//! This is the *engine-layer* binding only — no GUI. It mirrors the pyo3 binding
+//! This is the *engine-layer* binding only - no GUI. It mirrors the pyo3 binding
 //! (`src/python.rs`): flow YAML in, bytes in, rendered bytes out, all through
 //! `engine::process_bytes_stream`. Callers can build a Web UI on top later
 //! (v1.0+, separate repo).
 
+use std::sync::{LazyLock, Mutex};
+
 use wasm_bindgen::prelude::*;
 
+use dpa::engine::EngineConfig;
 use dpa::flow::{Flow, OutputFormat};
 use dpa::{engine, i18n, ops};
+
+/// WASM hosts configure the engine through the exported setters; values are
+/// stored per-wasm-instance (single-threaded) and passed by value into each
+/// `run` call (the engine core keeps no process-wide state).
+static WASM_CFG: LazyLock<Mutex<EngineConfig>> =
+    LazyLock::new(|| Mutex::new(EngineConfig::default()));
+
+fn current_cfg() -> EngineConfig {
+    WASM_CFG.lock().unwrap().clone()
+}
 
 fn js_err(e: anyhow::Error) -> JsValue {
     JsValue::from_str(&format!("{:#}", e))
 }
 
 fn parse_flow(yaml_text: &str) -> Result<Flow, JsValue> {
-    let flow: Flow = serde_yaml::from_str(yaml_text).map_err(|e| {
+    let flow: Flow = dpa::flow::from_yaml(yaml_text).map_err(|e| {
         JsValue::from_str(&i18n::tf(
             "err.parse_flow_failed",
             &[e.to_string().as_str()],
@@ -46,7 +59,8 @@ pub fn run(
 ) -> Result<Vec<u8>, JsValue> {
     let flow = parse_flow(flow_yaml)?;
     let fmt = resolve_fmt(&flow, output_format)?;
-    engine::process_bytes_stream(&flow, data, fmt).map_err(js_err)
+    let cfg = current_cfg();
+    engine::process_bytes_stream(&flow, data, fmt, &cfg).map_err(js_err)
 }
 
 /// Run flows in memory in batch: `dpa_wasm.run_batch(flow_yaml, items: Array<Uint8Array>, output_format?) -> Array<Uint8Array>`.
@@ -59,10 +73,11 @@ pub fn run_batch(
     let flow = parse_flow(flow_yaml)?;
     let fmt = resolve_fmt(&flow, output_format)?;
 
+    let cfg = current_cfg();
     let out = js_sys::Array::new();
     for item in items.iter() {
         let bytes = js_sys::Uint8Array::new(&item).to_vec();
-        let rendered = engine::process_bytes_stream(&flow, &bytes, fmt).map_err(js_err)?;
+        let rendered = engine::process_bytes_stream(&flow, &bytes, fmt, &cfg).map_err(js_err)?;
         out.push(&js_sys::Uint8Array::from(&rendered[..]));
     }
     Ok(out)
@@ -118,4 +133,27 @@ pub fn op(name: &str) -> Option<String> {
 #[wasm_bindgen]
 pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Configure the whole-input byte cap (bytes; 0 = unlimited).
+/// WASM hosts could not previously adjust the 256 MiB default
+/// for browser memory-constrained environments.
+#[wasm_bindgen]
+pub fn set_max_input_bytes(n: usize) {
+    let mut g = WASM_CFG.lock().unwrap();
+    *g = g.clone().with_max_input_bytes(n);
+}
+
+/// Configure the per-step streaming output cap (bytes; 0 = unlimited).
+#[wasm_bindgen]
+pub fn set_max_step_output_bytes(n: usize) {
+    let mut g = WASM_CFG.lock().unwrap();
+    *g = g.clone().with_max_step_output_bytes(n);
+}
+
+/// Enable/disable per-step timing / byte accounting on stderr (`--verbose`).
+#[wasm_bindgen]
+pub fn set_verbose(on: bool) {
+    let mut g = WASM_CFG.lock().unwrap();
+    *g = g.clone().with_verbose(on);
 }

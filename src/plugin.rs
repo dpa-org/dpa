@@ -79,6 +79,16 @@ pub struct PluginOpEntry {
 
 // Raw pointers inside; PluginOpEntry is only used behind & in the plugin-side
 // static table, never sent across threads. Safe enough for the export macro.
+//
+// # Safety
+//
+// `PluginOpEntry` contains raw pointers (`name_ptr` / `category_ptr` /
+// `description_ptr`) into leaked `'static` string data. The pointers are
+// read-only, never mutated, and are only dereferenced while the plugin stays
+// loaded (the host keeps it loaded for the whole process lifetime), so the
+// values they point to cannot be invalidated or aliased mutably. Entries are
+// additionally only ever shared behind `&PluginOpEntry` references and are
+// never sent across threads; making the type `Send + Sync` is therefore sound.
 unsafe impl Send for PluginOpEntry {}
 unsafe impl Sync for PluginOpEntry {}
 
@@ -115,7 +125,7 @@ impl PluginOpEntry {
 /// `{"<name>":{"required":bool,"description":"..."}}`.
 pub fn args_spec_to_json(args: &[ArgSpec]) -> String {
     // Serialize through serde_json so every string field (names, descriptions,
-    // formats) is escaped exactly like the parser expects (review §3-G: the
+    // formats) is escaped exactly like the parser expects. The
     // previous hand-rolled builder only escaped `"` and could emit invalid
     // JSON for backslashes/newlines).
     let mut map = serde_json::Map::new();
@@ -135,9 +145,8 @@ pub fn args_spec_to_json(args: &[ArgSpec]) -> String {
 /// Parse the plugin `args_json` spec format into `ArgSpec`s (used by the host
 /// registry so plugin ops show up in `dpa list` / `dpa ops`).
 ///
-/// Returns an error instead of silently swallowing malformed JSON (review
-/// §3-G: the previous version returned an empty `Vec` on failure, which hid
-/// broken plugin metadata).
+/// Returns an error instead of silently swallowing malformed JSON: an earlier
+/// version returned an empty `Vec` on failure, which hid broken plugin metadata.
 pub fn parse_args_spec_json(s: &str) -> anyhow::Result<Vec<ArgSpec>> {
     let v = serde_json::from_str::<serde_json::Value>(s)
         .map_err(|e| anyhow::anyhow!("invalid plugin args spec JSON: {e}"))?;
@@ -237,7 +246,7 @@ fn registry() -> &'static Mutex<Vec<LoadedPlugin>> {
     REGISTRY.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-/// File name of the per-directory plugin hash manifest (review §3-P8).
+/// File name of the per-directory plugin hash manifest.
 const PLUGIN_HASH_MANIFEST: &str = ".dpa-plugin-hashes.json";
 
 /// SHA-256 of a file in hex, streamed to avoid loading large binaries.
@@ -260,7 +269,7 @@ fn file_sha256(path: &Path) -> anyhow::Result<String> {
 /// skipped with a warning on stderr; returns the number of successfully loaded
 /// plugins. Missing directories are treated as "nothing to load" (no error).
 ///
-/// Review §3-P8 (plugin hash manifest): on first use the directory's SHA-256
+/// On first use the directory's SHA-256
 /// manifest is generated; afterwards only plugins whose hash matches the
 /// manifest are loaded. Deleting `.dpa-plugin-hashes.json` regenerates it.
 pub fn load_plugins(dir: &Path) -> anyhow::Result<usize> {
@@ -361,16 +370,16 @@ pub fn load_plugins(dir: &Path) -> anyhow::Result<usize> {
                 map.insert(name.to_string(), serde_json::Value::String(h));
             }
         }
-        if let Ok(s) = serde_json::to_string_pretty(&serde_json::Value::Object(map)) {
-            if std::fs::write(&manifest_path, s).is_ok() {
-                eprintln!(
-                    "{}",
-                    i18n::tf(
-                        "msg.plugin_hash_generated",
-                        &[manifest_path.display().to_string().as_str()]
-                    )
-                );
-            }
+        if let Ok(s) = serde_json::to_string_pretty(&serde_json::Value::Object(map))
+            && std::fs::write(&manifest_path, s).is_ok()
+        {
+            eprintln!(
+                "{}",
+                i18n::tf(
+                    "msg.plugin_hash_generated",
+                    &[manifest_path.display().to_string().as_str()]
+                )
+            );
         }
     }
 
@@ -384,12 +393,12 @@ pub fn load_plugins(dir: &Path) -> anyhow::Result<usize> {
 /// directories that actually exist are returned.
 pub fn default_plugin_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let bundled = parent.join("plugins");
-            if bundled.is_dir() {
-                dirs.push(bundled);
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(parent) = exe.parent()
+    {
+        let bundled = parent.join("plugins");
+        if bundled.is_dir() {
+            dirs.push(bundled);
         }
     }
     let user_dir = if cfg!(windows) {
@@ -404,10 +413,10 @@ pub fn default_plugin_dirs() -> Vec<PathBuf> {
             base.join(".dpa").join("plugins")
         }
     });
-    if let Some(dir) = user_dir {
-        if dir.is_dir() {
-            dirs.push(dir);
-        }
+    if let Some(dir) = user_dir
+        && dir.is_dir()
+    {
+        dirs.push(dir);
     }
     dirs
 }
@@ -505,15 +514,31 @@ fn load_one(path: &Path) -> anyhow::Result<LoadedPlugin> {
                 continue;
             }
             let name = CStr::from_ptr(name_ptr).to_string_lossy().into_owned();
-            let category = CStr::from_ptr(category_ptr).to_string_lossy().into_owned();
-            let description = CStr::from_ptr(description_ptr)
-                .to_string_lossy()
-                .into_owned();
-            let args_json = CStr::from_ptr(args_ptr).to_string_lossy().into_owned();
+            // A host may expose a valid name together with null
+            // metadata pointers. Treat a missing category/description as an
+            // empty string and a missing arg spec as an empty JSON object
+            // instead of dereferencing null.
+            let category = if category_ptr.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr(category_ptr).to_string_lossy().into_owned()
+            };
+            let description = if description_ptr.is_null() {
+                String::new()
+            } else {
+                CStr::from_ptr(description_ptr)
+                    .to_string_lossy()
+                    .into_owned()
+            };
+            let args_json = if args_ptr.is_null() {
+                "{}".to_string()
+            } else {
+                CStr::from_ptr(args_ptr).to_string_lossy().into_owned()
+            };
             let args = match parse_args_spec_json(&args_json) {
                 Ok(v) => Box::leak(v.into_boxed_slice()),
                 Err(e) => {
-                    // Review §3-G: surface malformed plugin metadata instead of
+                    // Surface malformed plugin metadata instead of
                     // silently registering the op with an empty arg spec.
                     eprintln!(
                         "{}",
@@ -547,9 +572,9 @@ fn load_one(path: &Path) -> anyhow::Result<LoadedPlugin> {
 }
 
 /// Build dpa `Op`s for every loaded plugin op. Called exactly once by the
-/// process-wide registry in `ops::mod` (review fix 3.2/3.4): the plugin
+/// process-wide registry in `ops::mod`. The plugin
 /// registry is immutable after [`load_plugins`], so the returned table is
-/// materialized once and owned by the registry — no per-call `Box::leak` of
+/// materialized once and owned by the registry - no per-call `Box::leak` of
 /// `&'static str` metadata. Op metadata is owned (`String`).
 pub(crate) fn plugin_ops_vec() -> Vec<Op> {
     build_plugin_ops()
@@ -566,9 +591,29 @@ fn build_plugin_ops() -> Vec<Op> {
             let run_ptr = op.run;
             let buf_free = op.buf_free;
             let last_error = op.last_error;
-            let name_c = CString::new(op.name.clone()).unwrap_or_default();
+            // A CString build failure (embedded NUL) used to be
+            // swallowed, registering an op whose host bridge would receive an
+            // empty name. Skip the op and surface the problem instead.
+            let name_c = match CString::new(op.name.clone()) {
+                Ok(v) => v,
+                Err(_) => {
+                    eprintln!(
+                        "dpa: skip plugin op `{}`: name contains an embedded NUL byte",
+                        op.name
+                    );
+                    continue;
+                }
+            };
+            let run_name_c = name_c.clone();
             let run = Box::new(move |input: &[u8], args: &HashMap<String, String>| {
-                call_plugin_run(name_c.as_ptr(), run_ptr, buf_free, last_error, input, args)
+                call_plugin_run(
+                    run_name_c.as_ptr(),
+                    run_ptr,
+                    buf_free,
+                    last_error,
+                    input,
+                    args,
+                )
             });
             let stream = op.stream_init.map(|init| {
                 // ABI guarantees all-or-nothing: if stream_init exists, the
@@ -577,7 +622,7 @@ fn build_plugin_ops() -> Vec<Op> {
                 let finish = op.stream_finish.unwrap();
                 let free = op.stream_free.unwrap();
                 let last_error = op.last_error;
-                let name_c = CString::new(op.name.clone()).unwrap_or_default();
+                let name_c = name_c.clone();
                 let factory: StreamFactory = Box::new(move |args: &HashMap<String, String>| {
                     let args_json = serde_json::to_string(args)?;
                     let c_args = CString::new(args_json)?;
@@ -601,7 +646,7 @@ fn build_plugin_ops() -> Vec<Op> {
                 factory
             });
             let (family, kind) = crate::ops::derive_family_kind(&name, &category);
-            let level = crate::ops::derive_level(&name, &category, &family, &kind);
+            let level = crate::ops::derive_level(&kind);
             out.push(Op {
                 name,
                 category,
@@ -611,6 +656,7 @@ fn build_plugin_ops() -> Vec<Op> {
                 input: crate::ops::OpIO::Unspecified,
                 output: crate::ops::OpIO::Unspecified,
                 description,
+                example: None,
                 args: op.args,
                 run,
                 stream,
@@ -906,6 +952,13 @@ macro_rules! _dpa_plugin_body {
                 _dpa_plugin_set_error("dpa_plugin_op_run: null argument".into());
                 return -1;
             }
+            // Cap the untrusted input length so a corrupt host
+            // cannot make from_raw_parts read an unbounded slice.
+            const MAX_IN_LEN: usize = 256 * 1024 * 1024;
+            if in_len > MAX_IN_LEN {
+                _dpa_plugin_set_error("dpa_plugin_op_run: input too large".into());
+                return -1;
+            }
             let Some(entry) = _dpa_plugin_ops().iter().find(|e| {
                 let n = unsafe { ::std::ffi::CStr::from_ptr(name) }.to_string_lossy();
                 n == e.name
@@ -919,8 +972,14 @@ macro_rules! _dpa_plugin_body {
                 _dpa_plugin_set_error("dpa_plugin_op_run: invalid args_json".into());
                 return -1;
             };
-            match (entry.run)(input, &args) {
-                Ok(v) => {
+            // Catch panics from plugin Rust code at the ABI boundary.
+            // Unwinding out of an `extern "C"` function is undefined behaviour
+            // and typically aborts the whole host process, so any panic in the
+            // op is converted into a normal plugin error instead.
+            match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                (entry.run)(input, &args)
+            })) {
+                Ok(Ok(v)) => {
                     _dpa_plugin_clear_error();
                     let len = v.len();
                     let boxed = v.into_boxed_slice();
@@ -930,8 +989,14 @@ macro_rules! _dpa_plugin_body {
                     }
                     0
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     _dpa_plugin_set_error(::std::format!("dpa_plugin_op_run: {}", e));
+                    -1
+                }
+                Err(_) => {
+                    _dpa_plugin_set_error(
+                        "dpa_plugin_op_run: panic in plugin op (report to plugin author)".into(),
+                    );
                     -1
                 }
             }
@@ -963,8 +1028,8 @@ macro_rules! _dpa_plugin_body {
                 _dpa_plugin_set_error("dpa_plugin_op_stream_init: invalid args_json".into());
                 return ::std::ptr::null_mut();
             };
-            match make(&args) {
-                Ok(op) => {
+            match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| make(&args))) {
+                Ok(Ok(op)) => {
                     _dpa_plugin_clear_error();
                     // Double-box to a thin pointer: the trait object's fat pointer
                     // (data + vtable) cannot survive a cast to *mut c_void, so we
@@ -975,8 +1040,14 @@ macro_rules! _dpa_plugin_body {
                         ::std::boxed::Box::new(op);
                     ::std::boxed::Box::into_raw(double) as *mut ::std::ffi::c_void
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     _dpa_plugin_set_error(::std::format!("dpa_plugin_op_stream_init: {}", e));
+                    ::std::ptr::null_mut()
+                }
+                Err(_) => {
+                    _dpa_plugin_set_error(
+                        "dpa_plugin_op_stream_init: panic in plugin factory (report to plugin author)".into(),
+                    );
                     ::std::ptr::null_mut()
                 }
             }
@@ -999,11 +1070,18 @@ macro_rules! _dpa_plugin_body {
                 _dpa_plugin_set_error("dpa_plugin_op_stream_write: null input".into());
                 return -1;
             }
+            // Cap the untrusted input length (same ceiling as
+            // the in-memory bridge).
+            const MAX_IN_LEN: usize = 256 * 1024 * 1024;
+            if in_len > MAX_IN_LEN {
+                _dpa_plugin_set_error("dpa_plugin_op_stream_write: input too large".into());
+                return -1;
+            }
             let b: &mut ::std::boxed::Box<dyn $crate::ops::StreamingOp> =
                 unsafe { &mut *(h as *mut ::std::boxed::Box<dyn $crate::ops::StreamingOp>) };
             let input = unsafe { ::std::slice::from_raw_parts(in_p, in_len) };
-            match b.write(input) {
-                Ok(v) => {
+            match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| b.write(input))) {
+                Ok(Ok(v)) => {
                     _dpa_plugin_clear_error();
                     let len = v.len();
                     let boxed = v.into_boxed_slice();
@@ -1013,8 +1091,14 @@ macro_rules! _dpa_plugin_body {
                     }
                     0
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     _dpa_plugin_set_error(::std::format!("dpa_plugin_op_stream_write: {}", e));
+                    -1
+                }
+                Err(_) => {
+                    _dpa_plugin_set_error(
+                        "dpa_plugin_op_stream_write: panic in plugin stream (report to plugin author)".into(),
+                    );
                     -1
                 }
             }
@@ -1033,8 +1117,8 @@ macro_rules! _dpa_plugin_body {
             }
             let b: &mut ::std::boxed::Box<dyn $crate::ops::StreamingOp> =
                 unsafe { &mut *(h as *mut ::std::boxed::Box<dyn $crate::ops::StreamingOp>) };
-            match b.finish() {
-                Ok(v) => {
+            match ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| b.finish())) {
+                Ok(Ok(v)) => {
                     _dpa_plugin_clear_error();
                     let len = v.len();
                     let boxed = v.into_boxed_slice();
@@ -1044,8 +1128,14 @@ macro_rules! _dpa_plugin_body {
                     }
                     0
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     _dpa_plugin_set_error(::std::format!("dpa_plugin_op_stream_finish: {}", e));
+                    -1
+                }
+                Err(_) => {
+                    _dpa_plugin_set_error(
+                        "dpa_plugin_op_stream_finish: panic in plugin stream (report to plugin author)".into(),
+                    );
                     -1
                 }
             }
@@ -1072,4 +1162,102 @@ macro_rules! _dpa_plugin_body {
             }
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    fn panic_run(_input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+        panic!("boom from plugin op");
+    }
+
+    fn ok_run(_input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+        Ok(b"ok".to_vec())
+    }
+
+    dpa_plugin! {
+        version: 2,
+        ops: [
+            {
+                name: "dpa:test:panic",
+                category: "test",
+                description: "test op that panics",
+                args: &[],
+                run: panic_run,
+            },
+            {
+                name: "dpa:test:ok",
+                category: "test",
+                description: "test op that succeeds",
+                args: &[],
+                run: ok_run,
+            },
+        ],
+    }
+
+    fn last_error_text() -> String {
+        _DPA_PLUGIN_LAST_ERROR
+            .with(|e| {
+                e.borrow()
+                    .as_ref()
+                    .map(|c| c.to_string_lossy().into_owned())
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn panic_in_plugin_op_is_caught_at_abi_boundary() {
+        // A panicking plugin op must surface as a plugin error (-1)
+        // instead of unwinding across the extern "C" boundary (UB -> host
+        // abort). Reaching this assertion at all proves the process survived.
+        let name = std::ffi::CString::new("dpa:test:panic").unwrap();
+        let args = std::ffi::CString::new("{}").unwrap();
+        let input = b"hi";
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        let rc = dpa_plugin_op_run(
+            name.as_ptr(),
+            input.as_ptr(),
+            input.len(),
+            args.as_ptr(),
+            &mut out_ptr,
+            &mut out_len,
+        );
+        assert_ne!(
+            rc, 0,
+            "panic must become a plugin error, not abort the host"
+        );
+        assert_eq!(out_ptr, std::ptr::null_mut());
+        assert_eq!(out_len, 0);
+        assert!(
+            last_error_text().contains("panic"),
+            "last error should describe the panic, got: {}",
+            last_error_text()
+        );
+    }
+
+    #[test]
+    fn normal_plugin_op_still_succeeds_after_catch() {
+        // The catch_unwind boundary must not disturb the happy path.
+        let name = std::ffi::CString::new("dpa:test:ok").unwrap();
+        let args = std::ffi::CString::new("{}").unwrap();
+        let input = b"hi";
+        let mut out_ptr: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        let rc = dpa_plugin_op_run(
+            name.as_ptr(),
+            input.as_ptr(),
+            input.len(),
+            args.as_ptr(),
+            &mut out_ptr,
+            &mut out_len,
+        );
+        assert_eq!(rc, 0, "ok op must return 0");
+        assert_eq!(out_len, 2);
+        let out = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(out, b"ok");
+        dpa_plugin_buf_free(out_ptr, out_len);
+        assert!(last_error_text().is_empty(), "no error expected on success");
+    }
 }

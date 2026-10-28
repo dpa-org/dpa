@@ -8,6 +8,31 @@ use rand::{Rng, RngCore};
 use super::{ArgSpec, Op};
 use crate::i18n;
 
+/// Return `args[name]` or `default` when absent / empty.
+fn opt_arg<'a>(args: &'a HashMap<String, String>, name: &str, default: &'a str) -> &'a str {
+    match args.get(name) {
+        Some(v) if !v.trim().is_empty() => v,
+        _ => default,
+    }
+}
+
+/// Error messages for single-value ops must not echo the whole
+/// input back - a multi-line or huge input would amplify stderr without bound
+/// and flood the terminal with the offending bytes. Show at most 64 bytes
+/// plus the total length so logs stay bounded while the user still sees enough
+/// context to spot the bad value.
+fn brief_input(s: &str) -> String {
+    const MAX: usize = 64;
+    if s.len() <= MAX {
+        return s.to_string();
+    }
+    let mut end = MAX;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}... ({} bytes total)", &s[..end], s.len())
+}
+
 /// RFC 4122 namespace UUIDs (DNS / URL / OID / X500), reused by UUID v3/v5.
 const NAMESPACES: &[(&str, &str)] = &[
     ("dns", "6ba7b810-9dad-11d1-80b4-00c04fd430c8"),
@@ -34,7 +59,12 @@ pub fn ops() -> Vec<Op> {
             "dpa:timestamp:to:date",
             "generate",
             "op.timestamp.to.date.desc",
-            &[],
+            &[ArgSpec {
+                name: "unit",
+                required: false,
+                description: "op.timestamp.to.date.arg.unit",
+                format: crate::ops::ArgFormat::Utf8,
+            },],
             timestamp_to_date
         ),
         op!(
@@ -50,6 +80,26 @@ pub fn ops() -> Vec<Op> {
             filetime
         ),
         op!(
+            "dpa:filetime:from:unix",
+            "generate",
+            "op.filetime.from.unix.desc",
+            &[
+                ArgSpec {
+                    name: "unit",
+                    required: false,
+                    description: "op.filetime.from.unix.arg.unit",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "format",
+                    required: false,
+                    description: "op.filetime.from.unix.arg.format",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+            ],
+            filetime_from_unix
+        ),
+        op!(
             "dpa:filetime:to:date",
             "generate",
             "op.filetime.to.date.desc",
@@ -60,6 +110,32 @@ pub fn ops() -> Vec<Op> {
                 format: crate::ops::ArgFormat::Utf8,
             },],
             filetime_to_date
+        ),
+        op!(
+            "dpa:uuid",
+            "generate",
+            "op.uuid.desc",
+            &[
+                ArgSpec {
+                    name: "version",
+                    required: false,
+                    description: "op.uuid.arg.version",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "namespace",
+                    required: false,
+                    description: "op.uuid.arg.namespace",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "name",
+                    required: false,
+                    description: "op.uuid.arg.name",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+            ],
+            uuid4
         ),
         op!(
             "dpa:uuid4",
@@ -111,27 +187,7 @@ pub fn ops() -> Vec<Op> {
             },],
             random_bytes_hex
         ),
-        // generate family additions (Lorem Ipsum / De Bruijn / prime / HOTP / TOTP)
-        op!(
-            "dpa:lorem:ipsum",
-            "generate",
-            "op.lorem.ipsum.desc",
-            &[
-                ArgSpec {
-                    name: "length",
-                    required: false,
-                    description: "op.lorem.ipsum.arg.length",
-                    format: crate::ops::ArgFormat::Utf8,
-                },
-                ArgSpec {
-                    name: "unit",
-                    required: false,
-                    description: "op.lorem.ipsum.arg.unit",
-                    format: crate::ops::ArgFormat::Utf8,
-                },
-            ],
-            lorem_ipsum
-        ),
+        // generate family additions (De Bruijn / prime / HOTP / TOTP)
         op!(
             "dpa:de:bruijn",
             "generate",
@@ -170,6 +226,12 @@ pub fn ops() -> Vec<Op> {
                     format: crate::ops::ArgFormat::Utf8,
                 },
                 ArgSpec {
+                    name: "rounds",
+                    required: false,
+                    description: "op.prime.arg.rounds",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
                     name: "format",
                     required: false,
                     description: "op.prime.arg.format",
@@ -199,6 +261,12 @@ pub fn ops() -> Vec<Op> {
                     name: "counter",
                     required: false,
                     description: "op.hotp.arg.counter",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "algo",
+                    required: false,
+                    description: "op.hotp.arg.algo",
                     format: crate::ops::ArgFormat::Utf8,
                 },
             ],
@@ -237,6 +305,12 @@ pub fn ops() -> Vec<Op> {
                     name: "time",
                     required: false,
                     description: "op.totp.arg.time",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "algo",
+                    required: false,
+                    description: "op.totp.arg.algo",
                     format: crate::ops::ArgFormat::Utf8,
                 },
             ],
@@ -289,11 +363,22 @@ fn unix_to_utc(secs: i64) -> String {
     format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02}:{ss:02}")
 }
 
-fn timestamp_to_date(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+fn timestamp_to_date(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     let s = String::from_utf8_lossy(input).trim().to_string();
-    let secs: i64 = s
-        .parse()
-        .map_err(|_| anyhow::anyhow!("{}", i18n::tf("err.not_unix_time", &[s.as_str()])))?;
+    let ts: i64 = s.parse().map_err(|_| {
+        anyhow::anyhow!(
+            "{}",
+            i18n::tf("err.not_unix_time", &[brief_input(&s).as_str()])
+        )
+    })?;
+    // `unit` selects the input granularity: s (default) / ms / us / ns.
+    let secs = match args.get("unit").map(|u| u.as_str()).unwrap_or("s") {
+        "s" | "secs" | "seconds" => ts,
+        "ms" | "millis" | "milliseconds" => ts.div_euclid(1_000),
+        "us" | "micros" | "microseconds" => ts.div_euclid(1_000_000),
+        "ns" | "nanos" | "nanoseconds" => ts.div_euclid(1_000_000_000),
+        _ => anyhow::bail!("{}", i18n::t("err.timestamp_bad_unit")),
+    };
     Ok(unix_to_utc(secs).into_bytes())
 }
 
@@ -312,18 +397,72 @@ fn filetime(_input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec
     }
 }
 
+fn filetime_from_unix(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let s = String::from_utf8_lossy(input).trim().to_string();
+    let secs: i64 = s.parse().map_err(|_| {
+        anyhow::anyhow!(
+            "{}",
+            i18n::tf("err.not_filetime", &[brief_input(&s).as_str()])
+        )
+    })?;
+    // Support s (default) / ms / us inputs, scaled to whole seconds.
+    let scaled = match args.get("unit").map(|u| u.as_str()).unwrap_or("s") {
+        "s" | "secs" | "seconds" => secs,
+        "ms" | "millis" | "milliseconds" => secs.checked_div(1_000).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{}",
+                i18n::tf("err.not_filetime", &[brief_input(&s).as_str()])
+            )
+        })?,
+        "us" | "micros" | "microseconds" => secs.checked_div(1_000_000).ok_or_else(|| {
+            anyhow::anyhow!(
+                "{}",
+                i18n::tf("err.not_filetime", &[brief_input(&s).as_str()])
+            )
+        })?,
+        _ => anyhow::bail!("{}", i18n::t("err.filetime_bad_unit")),
+    };
+    // FILETIME = 100ns ticks since 1601-01-01 UTC.
+    let ticks = scaled
+        .checked_add(11_644_473_600i64)
+        .and_then(|v| v.checked_mul(10_000_000i64))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "{}",
+                i18n::tf("err.not_filetime", &[brief_input(&s).as_str()])
+            )
+        })?;
+    let fmt = args.get("format").map(|s| s.as_str()).unwrap_or("hex");
+    if fmt == "dec" {
+        Ok(ticks.to_string().into_bytes())
+    } else {
+        Ok(hex::encode(ticks.to_le_bytes()).into_bytes())
+    }
+}
+
 fn filetime_to_date(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     let s = String::from_utf8_lossy(input).trim().to_string();
     let ticks: i64 = if let Some(hex_s) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        let bytes = hex::decode(hex_s)
-            .map_err(|_| anyhow::anyhow!("{}", i18n::tf("err.not_filetime", &[s.as_str()])))?;
-        let arr: [u8; 8] = bytes
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("{}", i18n::tf("err.not_filetime", &[s.as_str()])))?;
+        let bytes = hex::decode(hex_s).map_err(|_| {
+            anyhow::anyhow!(
+                "{}",
+                i18n::tf("err.not_filetime", &[brief_input(&s).as_str()])
+            )
+        })?;
+        let arr: [u8; 8] = bytes.try_into().map_err(|_| {
+            anyhow::anyhow!(
+                "{}",
+                i18n::tf("err.not_filetime", &[brief_input(&s).as_str()])
+            )
+        })?;
         i64::from_le_bytes(arr)
     } else {
-        s.parse()
-            .map_err(|_| anyhow::anyhow!("{}", i18n::tf("err.not_filetime", &[s.as_str()])))?
+        s.parse().map_err(|_| {
+            anyhow::anyhow!(
+                "{}",
+                i18n::tf("err.not_filetime", &[brief_input(&s).as_str()])
+            )
+        })?
     };
     // The input may be expressed in FILETIME ticks (default), microseconds,
     // milliseconds or whole seconds. Scale back to 100ns ticks before converting.
@@ -334,9 +473,12 @@ fn filetime_to_date(input: &[u8], args: &HashMap<String, String>) -> anyhow::Res
         "s" | "secs" | "seconds" => 10_000_000i64,
         _ => anyhow::bail!("{}", i18n::t("err.filetime_bad_unit")),
     };
-    let scaled = ticks
-        .checked_mul(scale)
-        .ok_or_else(|| anyhow::anyhow!("{}", i18n::tf("err.not_filetime", &[s.as_str()])))?;
+    let scaled = ticks.checked_mul(scale).ok_or_else(|| {
+        anyhow::anyhow!(
+            "{}",
+            i18n::tf("err.not_filetime", &[brief_input(&s).as_str()])
+        )
+    })?;
     let unix_secs = scaled / 10_000_000 - 11_644_473_600i64;
     Ok(unix_to_utc(unix_secs).into_bytes())
 }
@@ -650,22 +792,58 @@ fn base32_decode(s: &str) -> anyhow::Result<Vec<u8>> {
     Ok(out)
 }
 
-/// HMAC-SHA1 (RFC 2104) over `data` with `key`.
-fn hmac_sha1(key: &[u8], data: &[u8]) -> Vec<u8> {
+/// HMAC over `data` with `key` for the OTP family (RFC 4226 / RFC 6238).
+fn otp_hmac(algo: &str, key: &[u8], data: &[u8]) -> anyhow::Result<Vec<u8>> {
     use hmac::{Hmac, Mac};
-    let mut mac = Hmac::<sha1::Sha1>::new_from_slice(key).expect("HMAC accepts keys of any length");
-    mac.update(data);
-    mac.finalize().into_bytes().to_vec()
+    macro_rules! run {
+        ($t:ty) => {{
+            let mut mac = <$t as Mac>::new_from_slice(key).map_err(|e| {
+                anyhow::anyhow!("{}", i18n::tf("err.hmac_init", &[e.to_string().as_str()]))
+            })?;
+            mac.update(data);
+            Ok(mac.finalize().into_bytes().to_vec())
+        }};
+    }
+    match algo {
+        "sha1" => run!(Hmac<sha1::Sha1>),
+        "sha256" => run!(Hmac<sha2::Sha256>),
+        "sha512" => run!(Hmac<sha2::Sha512>),
+        other => anyhow::bail!(
+            "{}",
+            i18n::tf("err.unknown_algo", &[other, "sha1 / sha256 / sha512"])
+        ),
+    }
 }
 
-/// HOTP core (RFC 4226): HMAC-SHA1 over a 64-bit big-endian counter, dynamic truncation.
-fn otp_code(key: &[u8], counter: u64, digits: usize) -> Vec<u8> {
+/// HOTP core (RFC 4226): HMAC over a 64-bit big-endian counter, dynamic truncation.
+fn otp_code(algo: &str, key: &[u8], counter: u64, digits: usize) -> anyhow::Result<Vec<u8>> {
     let msg = counter.to_be_bytes();
-    let hs = hmac_sha1(key, &msg);
-    let off = (hs[19] & 0x0f) as usize;
+    let hs = otp_hmac(algo, key, &msg)?;
+    let off = (hs[hs.len() - 1] & 0x0f) as usize;
     let bin = u32::from_be_bytes([hs[off], hs[off + 1], hs[off + 2], hs[off + 3]]) & 0x7fff_ffff;
     let code = (bin as u64) % 10u64.pow(digits as u32);
-    format!("{code:0width$}", width = digits).into_bytes()
+    Ok(format!("{code:0width$}", width = digits).into_bytes())
+}
+
+/// RFC 4648 base32 encoder (uppercase, no padding) for OTP secret display.
+fn base32_encode_std(input: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut out = String::with_capacity((input.len() * 8).div_ceil(5));
+    let mut acc: u32 = 0;
+    let mut bits: u32 = 0;
+    for &b in input {
+        acc = (acc << 8) | b as u32;
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(ALPHABET[(acc >> bits) as usize] as char);
+            acc &= (1u32 << bits) - 1;
+        }
+    }
+    if bits > 0 {
+        out.push(ALPHABET[((acc << (5 - bits)) & 0x1f) as usize] as char);
+    }
+    out
 }
 
 /// Parse an integer argument within [lo, hi]; empty -> default.
@@ -700,236 +878,11 @@ fn range_arg(
     Ok(val)
 }
 
-/// Lorem Ipsum word list (63 words, mirrors CyberChef's LoremIpsum.mjs).
-const LOREM_WORDS: &[&str] = &[
-    "ad",
-    "adipisicing",
-    "aliqua",
-    "aliquip",
-    "amet",
-    "anim",
-    "aute",
-    "cillum",
-    "commodo",
-    "consectetur",
-    "consequat",
-    "culpa",
-    "cupidatat",
-    "deserunt",
-    "do",
-    "dolor",
-    "dolore",
-    "duis",
-    "ea",
-    "eiusmod",
-    "elit",
-    "enim",
-    "esse",
-    "est",
-    "et",
-    "eu",
-    "ex",
-    "excepteur",
-    "exercitation",
-    "fugiat",
-    "id",
-    "in",
-    "incididunt",
-    "ipsum",
-    "irure",
-    "labore",
-    "laboris",
-    "laborum",
-    "Lorem",
-    "magna",
-    "minim",
-    "mollit",
-    "nisi",
-    "non",
-    "nostrud",
-    "nulla",
-    "occaecat",
-    "officia",
-    "pariatur",
-    "proident",
-    "qui",
-    "quis",
-    "reprehenderit",
-    "sint",
-    "sit",
-    "sunt",
-    "tempor",
-    "ullamco",
-    "ut",
-    "velit",
-    "veniam",
-    "voluptate",
-];
-
-/// Random words with no immediate repeat (CyberChef getWords).
-fn lorem_words(rng: &mut rand::rngs::ThreadRng, n: usize) -> Vec<String> {
-    let mut words = Vec::with_capacity(n);
-    let mut prev: Option<&str> = None;
-    while words.len() < n {
-        let w = LOREM_WORDS[rng.random_range(0..LOREM_WORDS.len())];
-        if prev == Some(w) {
-            continue;
-        }
-        words.push(w.to_string());
-        prev = Some(w);
-    }
-    words
-}
-
-/// getRandomLength: round((u1 + u2) + u3*stddev + mean), positive (CyberChef).
-fn lorem_random_length(rng: &mut rand::rngs::ThreadRng, mean: f64, std_dev: f64) -> usize {
-    loop {
-        let u1: f64 = rng.random_range(-1.0f64..1.0);
-        let u2: f64 = rng.random_range(-1.0f64..1.0);
-        let u3: f64 = rng.random_range(-1.0f64..1.0);
-        let len = (u1 + u2 + u3 * std_dev + mean).round() as i64;
-        if len > 0 {
-            return len as usize;
-        }
-    }
-}
-
-/// formatSentence: 35% comma, capitalise first char, trailing '.'.
-fn lorem_format_sentence(rng: &mut rand::rngs::ThreadRng, mut words: Vec<String>) -> String {
-    if rng.random_range(0.0f64..1.0) < 0.35 {
-        let pos = rng.random_range(0..words.len());
-        words[pos].push(',');
-    }
-    let mut s = words.join(" ");
-    let mut chars: Vec<char> = s.chars().collect();
-    if let Some(c) = chars.first_mut() {
-        *c = c.to_ascii_uppercase();
-    }
-    s = chars.into_iter().collect();
-    s.push('.');
-    s
-}
-
-/// Split words into sentences with random sentence lengths (CyberChef wordsToSentences).
-fn lorem_words_to_sentences(
-    rng: &mut rand::rngs::ThreadRng,
-    mut words: Vec<String>,
-) -> Vec<String> {
-    let mut sentences = Vec::new();
-    while !words.is_empty() {
-        let n = lorem_random_length(rng, 15.0, 9.0);
-        let take = n.min(words.len());
-        let chunk: Vec<String> = words.drain(..take).collect();
-        sentences.push(lorem_format_sentence(rng, chunk));
-    }
-    sentences
-}
-
-/// Split sentences into paragraphs with random paragraph lengths (CyberChef sentencesToParagraphs).
-fn lorem_sentences_to_paragraphs(
-    rng: &mut rand::rngs::ThreadRng,
-    mut sentences: Vec<String>,
-) -> Vec<String> {
-    let mut paragraphs = Vec::new();
-    while !sentences.is_empty() {
-        let n = lorem_random_length(rng, 5.0, 2.0);
-        let take = n.min(sentences.len());
-        let chunk: Vec<String> = sentences.drain(..take).collect();
-        paragraphs.push(chunk.join(" "));
-    }
-    if let Some(last) = paragraphs.last_mut() {
-        // Each paragraph joined with blank line; trim the final separator.
-        if last.ends_with(".") {
-            last.push_str("\n\n");
-        }
-    }
-    paragraphs
-}
-
-/// Replace the first 5 words with the canonical opening (CyberChef replaceStart).
-fn lorem_replace_start(s: String) -> String {
-    let mut words: Vec<&str> = s.split(' ').collect();
-    if words.len() > 5 {
-        words.splice(0..5, ["Lorem", "ipsum", "dolor", "sit", "amet"]);
-        return words.join(" ");
-    }
-    let lorem = ["Lorem", "ipsum", "dolor", "sit", "amet"];
-    words = lorem[..words.len()].to_vec();
-    let mut out = words.join(" ");
-    out.push('.');
-    out
-}
-
-fn lorem_ipsum(_input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    let unit = args.get("unit").map(|s| s.as_str()).unwrap_or("paragraphs");
-    let mut rng = rand::rng();
-    let out = match unit {
-        "paragraphs" => {
-            let n = range_arg(args, "length", 3, 1, 100_000)? as usize;
-            let mut paragraphs = Vec::with_capacity(n);
-            for _ in 0..n {
-                let sl = lorem_random_length(&mut rng, 15.0, 9.0);
-                let words = lorem_words(&mut rng, sl);
-                paragraphs.push(lorem_format_sentence(&mut rng, words));
-            }
-            let mut joined = lorem_sentences_to_paragraphs(&mut rng, paragraphs);
-            if let Some(first) = joined.first_mut() {
-                let s = std::mem::take(first);
-                *first = lorem_replace_start(s);
-            }
-            let mut text = joined.join("\n\n");
-            text.push('\n');
-            text
-        }
-        "sentences" => {
-            let n = range_arg(args, "length", 3, 1, 100_000)? as usize;
-            let mut sentences = Vec::with_capacity(n);
-            for _ in 0..n {
-                let sl = lorem_random_length(&mut rng, 15.0, 9.0);
-                let words = lorem_words(&mut rng, sl);
-                sentences.push(lorem_format_sentence(&mut rng, words));
-            }
-            let mut joined = lorem_sentences_to_paragraphs(&mut rng, sentences);
-            if let Some(first) = joined.first_mut() {
-                let s = std::mem::take(first);
-                *first = lorem_replace_start(s);
-            }
-            joined.join("\n\n")
-        }
-        "words" => {
-            let n = range_arg(args, "length", 3, 1, 100_000)? as usize;
-            let words = lorem_words(&mut rng, n);
-            let sentences = lorem_words_to_sentences(&mut rng, words);
-            let mut joined = lorem_sentences_to_paragraphs(&mut rng, sentences);
-            if let Some(first) = joined.first_mut() {
-                let s = std::mem::take(first);
-                *first = lorem_replace_start(s);
-            }
-            joined.join("\n\n")
-        }
-        "bytes" => {
-            let n = range_arg(args, "length", 3, 1, 1_000_000)? as usize;
-            let words = lorem_words(&mut rng, (n / 3) + 2);
-            let sentences = lorem_words_to_sentences(&mut rng, words);
-            let mut joined = lorem_sentences_to_paragraphs(&mut rng, sentences);
-            if let Some(first) = joined.first_mut() {
-                let s = std::mem::take(first);
-                *first = lorem_replace_start(s);
-            }
-            let text = joined.join("\n\n");
-            let truncated: String = text.chars().take(n).collect();
-            truncated
-        }
-        _ => anyhow::bail!("{}", i18n::tf("err.unknown_unit", &[unit])),
-    };
-    Ok(out.into_bytes())
-}
-
 /// FKM Lyndon-word construction of a De Bruijn sequence B(k, n).
 #[allow(clippy::needless_range_loop)]
 fn db_visit(t: usize, p: usize, k: usize, n: usize, a: &mut [usize], seq: &mut Vec<u8>) {
     if t > n {
-        if n % p != 0 {
+        if !n.is_multiple_of(p) {
             return;
         }
         for j in 1..=p {
@@ -968,7 +921,10 @@ fn rand_odd_bigint(bits: usize) -> num_bigint::BigUint {
     let nbytes = bits.div_ceil(8);
     let mut buf = vec![0u8; nbytes];
     rand::rng().fill_bytes(&mut buf);
+    // Mask out stray bits above the requested width so the value
+    // has exactly `bits` bits instead of bits..bits+7.
     let hi = (bits - 1) % 8;
+    buf[0] &= ((1u16 << (hi + 1)) - 1) as u8;
     buf[0] |= 1u8 << hi;
     buf[nbytes - 1] |= 1u8;
     num_bigint::BigUint::from_bytes_be(&buf)
@@ -984,7 +940,7 @@ fn is_probable_prime(n: &num_bigint::BigUint, rounds: usize) -> bool {
         return true;
     }
     if n.bit(0) {
-        // odd — proceed with Miller-Rabin
+        // odd - proceed with Miller-Rabin
     } else {
         return false;
     }
@@ -1027,10 +983,28 @@ fn is_probable_prime(n: &num_bigint::BigUint, rounds: usize) -> bool {
 }
 
 fn prime(_input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    let bits = range_arg(args, "bits", 512, 2, 4096)? as usize;
+    // Reject bit widths below 64 (err.range reports 64..=4096).
+    let bits = range_arg(args, "bits", 512, 64, 4096)? as usize;
     let grade = args.get("grade").map(|s| s.as_str()).unwrap_or("false") == "true";
     let fmt = args.get("format").map(|s| s.as_str()).unwrap_or("decimal");
-    let rounds = if grade { 40 } else { 7 };
+    // grade=false defaults to 24 rounds (was 7); an explicit
+    // `rounds` argument always overrides the grade-based default.
+    let rounds = match args
+        .get("rounds")
+        .map(|s| s.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        Some(raw) => raw.parse::<usize>().map_err(|e| {
+            anyhow::anyhow!("{}", i18n::tf("err.int_invalid", &[e.to_string().as_str()]))
+        })?,
+        None => {
+            if grade {
+                40
+            } else {
+                24
+            }
+        }
+    };
     let mut candidate = rand_odd_bigint(bits);
     let mut attempts = 0u32;
     while !is_probable_prime(&candidate, rounds) {
@@ -1049,27 +1023,47 @@ fn prime(_input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8
 }
 
 fn hotp(_input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let algo = opt_arg(args, "algo", "sha1").to_string();
     let key_raw = args.get("key").map(|s| s.as_str()).unwrap_or("");
-    let key = if key_raw.is_empty() {
+    let (key, secret_b32, generated) = if key_raw.is_empty() {
         let mut k = vec![0u8; 20];
         rand::rng().fill_bytes(&mut k);
-        k
+        let b32 = base32_encode_std(&k);
+        (k, b32, true)
     } else {
-        base32_decode(key_raw)?
+        (base32_decode(key_raw)?, String::new(), false)
     };
     let digits = range_arg(args, "digits", 6, 6, 8)? as usize;
     let counter = range_arg(args, "counter", 0, 0, i64::MAX)? as u64;
-    Ok(otp_code(&key, counter, digits))
+    let code = otp_code(&algo, &key, counter, digits)?;
+    if generated {
+        let uri = format!(
+            "otpauth://hotp/dpa:{}?digits={digits}&counter={counter}&secret={secret_b32}",
+            secret_b32
+        );
+        let mut out = format!(
+            "secret: {secret_b32}\n{uri}\ncode: {}\n",
+            String::from_utf8_lossy(&code)
+        );
+        out.push_str(
+            "note: random secret generated for demo only; re-run produces a different secret",
+        );
+        Ok(out.into_bytes())
+    } else {
+        Ok(code)
+    }
 }
 
 fn totp(_input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let algo = opt_arg(args, "algo", "sha1").to_string();
     let key_raw = args.get("key").map(|s| s.as_str()).unwrap_or("");
-    let key = if key_raw.is_empty() {
+    let (key, secret_b32, generated) = if key_raw.is_empty() {
         let mut k = vec![0u8; 20];
         rand::rng().fill_bytes(&mut k);
-        k
+        let b32 = base32_encode_std(&k);
+        (k, b32, true)
     } else {
-        base32_decode(key_raw)?
+        (base32_decode(key_raw)?, String::new(), false)
     };
     let digits = range_arg(args, "digits", 6, 6, 8)? as usize;
     let period = range_arg(args, "period", 30, 1, 86_400)? as u64;
@@ -1092,7 +1086,23 @@ fn totp(_input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>
         );
     }
     let counter = (time - epoch) / period;
-    Ok(otp_code(&key, counter, digits))
+    let code = otp_code(&algo, &key, counter, digits)?;
+    if generated {
+        let uri = format!(
+            "otpauth://totp/dpa:{}?digits={digits}&period={period}&secret={secret_b32}",
+            secret_b32
+        );
+        let mut out = format!(
+            "secret: {secret_b32}\n{uri}\ncode: {}\n",
+            String::from_utf8_lossy(&code)
+        );
+        out.push_str(
+            "note: random secret generated for demo only; re-run produces a different secret",
+        );
+        Ok(out.into_bytes())
+    } else {
+        Ok(code)
+    }
 }
 
 #[cfg(test)]
@@ -1120,36 +1130,6 @@ mod generate_tests {
         // Invalid character errors.
         assert!(base32_decode("MZXW6YTB0I").is_err());
         assert!(base32_decode("MZXW6YTBO1").is_err());
-    }
-
-    #[test]
-    fn lorem_ipsum_units() {
-        // words unit: 5 words, canonical opening replaced.
-        let out = String::from_utf8(
-            lorem_ipsum(b"", &args(&[("length", "5"), ("unit", "words")])).unwrap(),
-        )
-        .unwrap();
-        assert!(out.starts_with("Lorem ipsum dolor sit amet"), "got: {out}");
-        let words = out.split_whitespace().count();
-        assert!(
-            (5..=10).contains(&words),
-            "word count {words} (sentence splitting may wrap)"
-        );
-        // sentences unit: two sentences end with '.'.
-        let out = String::from_utf8(
-            lorem_ipsum(b"", &args(&[("length", "2"), ("unit", "sentences")])).unwrap(),
-        )
-        .unwrap();
-        let ends = out.matches('.').count();
-        assert!(ends >= 2, "sentence terminators {ends}: {out}");
-        // bytes unit: exact length cap.
-        let out = String::from_utf8(
-            lorem_ipsum(b"", &args(&[("length", "50"), ("unit", "bytes")])).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(out.chars().count(), 50);
-        // unknown unit errors.
-        assert!(lorem_ipsum(b"", &args(&[("unit", "chunks")])).is_err());
     }
 
     #[test]
@@ -1182,21 +1162,68 @@ mod generate_tests {
     }
 
     #[test]
-    fn prime_small_bits() {
-        // bits=8 -> probable prime in [128, 256).
-        let out = String::from_utf8(prime(b"", &args(&[("bits", "8")])).unwrap()).unwrap();
+    fn prime_min_bits_64() {
+        // Bit widths below 64 are rejected outright.
+        for bad in ["1", "8", "16", "63", "0", "-1"] {
+            assert!(
+                prime(b"", &args(&[("bits", bad)])).is_err(),
+                "bits={bad} should be rejected"
+            );
+        }
+        // At the new lower bound 64, the value is in [2^63, 2^64).
+        let out = String::from_utf8(prime(b"", &args(&[("bits", "64")])).unwrap()).unwrap();
         let n: u64 = out.parse().unwrap();
-        assert!((128..256).contains(&n), "n={n}");
-        assert!(is_probable_prime(&num_bigint::BigUint::from(n), 40));
-        // hex format.
+        assert!(((1u64 << 63)..=u64::MAX).contains(&n), "n={n}");
+        assert!(is_probable_prime(&num_bigint::BigUint::from(n), 24));
+        // 5000 still above the upper bound.
+        assert!(prime(b"", &args(&[("bits", "5000")])).is_err());
+        // hex format at the new lower bound.
         let hex =
-            String::from_utf8(prime(b"", &args(&[("bits", "16"), ("format", "hex")])).unwrap())
+            String::from_utf8(prime(b"", &args(&[("bits", "64"), ("format", "hex")])).unwrap())
                 .unwrap();
         assert!(hex.starts_with("0x"));
         assert!(u64::from_str_radix(&hex[2..], 16).is_ok());
-        // bounds.
-        assert!(prime(b"", &args(&[("bits", "1")])).is_err());
-        assert!(prime(b"", &args(&[("bits", "5000")])).is_err());
+    }
+
+    #[test]
+    fn prime_exact_bit_length() {
+        // Requested bits must be exact (high bits masked), not
+        // bits..bits+7 as the old random top-byte left the window open.
+        for &bits in &[64usize, 100, 257] {
+            for _ in 0..4 {
+                let out =
+                    String::from_utf8(prime(b"", &args(&[("bits", &bits.to_string())])).unwrap())
+                        .unwrap();
+                let n = num_bigint::BigUint::parse_bytes(out.as_bytes(), 10).unwrap();
+                assert_eq!(
+                    n.bits() as usize,
+                    bits,
+                    "requested {bits} bits, got {}",
+                    n.bits()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prime_rounds_default_and_override() {
+        // grade=false defaults to 24 rounds; explicit `rounds`
+        // overrides the grade-based default.
+        let out = String::from_utf8(prime(b"", &args(&[("bits", "64")])).unwrap()).unwrap();
+        let n = num_bigint::BigUint::parse_bytes(out.as_bytes(), 10).unwrap();
+        assert!(is_probable_prime(&n, 24));
+        // Explicit rounds=2 overrides the default (fast path, still valid).
+        let out2 =
+            String::from_utf8(prime(b"", &args(&[("bits", "64"), ("rounds", "2")])).unwrap())
+                .unwrap();
+        let n2 = num_bigint::BigUint::parse_bytes(out2.as_bytes(), 10).unwrap();
+        assert!(is_probable_prime(&n2, 2));
+        // Invalid rounds value is rejected; 0 rounds is tolerated (no checks).
+        assert!(prime(b"", &args(&[("bits", "64"), ("rounds", "abc")])).is_err());
+        assert!(prime(b"", &args(&[("bits", "64"), ("rounds", "-3")])).is_err());
+        assert!(prime(b"", &args(&[("bits", "64"), ("rounds", "0")])).is_ok());
+        // Empty rounds string falls back to the default.
+        assert!(prime(b"", &args(&[("bits", "64"), ("rounds", "")])).is_ok());
     }
 
     #[test]
@@ -1227,11 +1254,20 @@ mod generate_tests {
         // digits out of range.
         assert!(hotp(b"", &args(&[("key", key), ("digits", "5")])).is_err());
         assert!(hotp(b"", &args(&[("key", key), ("digits", "9")])).is_err());
-        // Empty key generates a random 20-byte secret (still 6 digits).
+        // Empty key generates a random 20-byte secret: output carries the
+        // base32 secret, otpauth URI and a 6-digit code (demo-only note).
         let r1 = String::from_utf8(hotp(b"", &HashMap::new()).unwrap()).unwrap();
-        assert_eq!(r1.len(), 6);
+        assert!(r1.starts_with("secret: "), "got {r1:?}");
+        assert!(r1.contains("otpauth://hotp/dpa:"), "got {r1:?}");
+        assert!(
+            r1.lines().any(|l| l.starts_with("code: ") && l.len() == 12),
+            "got {r1:?}"
+        );
         let r2 = String::from_utf8(hotp(b"", &HashMap::new()).unwrap()).unwrap();
-        assert_eq!(r2.len(), 6);
+        assert!(
+            r2.starts_with("secret: ") && r2.contains("otpauth://hotp/dpa:"),
+            "got {r2:?}"
+        );
     }
 
     #[test]

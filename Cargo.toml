@@ -1,12 +1,12 @@
 [workspace]
-members = ["plugins/demo", "plugins/ascii85", "dpa-wasm"]
+members = ["plugins/demo", "dpa-wasm"]
 resolver = "2"
 
 [package]
 name = "dpa"
 version = "1.0.0"
 edition = "2024"
-description = "Data Processing & Analysis — flows as code"
+description = "Data Processing & Analysis - flows as code"
 license = "Apache-2.0"
 repository = "https://github.com/dpa-org/dpa"
 readme = "README.md"
@@ -15,17 +15,17 @@ categories = ["command-line-utilities", "development-tools", "cryptography"]
 authors = ["dpa-org"]
 documentation = "https://docs.rs/dpa"
 homepage = "https://github.com/dpa-org/dpa"
-rust-version = "1.85"
+rust-version = "1.89"
 
 # crates.io packaging hygiene: keep dev artifacts and generated output out of
 # the published package. docs/ is intentionally included (plugin guide).
 exclude = ["output/", "archive/", "temp/", "dist/", "plugins/*.dll", "plugins/*.so", "plugins/*.dylib", "*.log", "*.err", "*.exe", "*.pdb"]
 
-# The bin is named dpa-cli so it does not collide with the `dpa` lib name on
-# Windows (cargo #6313 emits dpa.pdb for both). Installers copy dpa-cli.exe to
-# dpa.exe; the command users type stays `dpa`.
+# bin and lib share the name `dpa` (the conventional app+library layout).
+# On Windows MSVC, cargo warns about a dpa.pdb output-name collision (cargo
+# #6313); it is a known cargo issue and does not affect build output.
 [[bin]]
-name = "dpa-cli"
+name = "dpa"
 path = "src/main.rs"
 required-features = ["cli"]
 
@@ -46,8 +46,8 @@ md-5 = "0.10"
 rand = "0.9"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_yaml = "0.9"
+serde_json = { version = "1", features = ["preserve_order"] }
+serde-saphyr = "1"
 sha1 = "0.10"
 sha2 = "0.10"
 
@@ -77,9 +77,9 @@ csv = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "alloc"] }
 
 # YAML/XML conversion
-quick-xml = "0.37"
+quick-xml = "0.41"
 
-# generate family — prime (Miller-Rabin big integer)
+# generate family - prime (Miller-Rabin big integer)
 num-bigint = "0.4"
 num-traits = "0.2"
 
@@ -91,10 +91,12 @@ python = ["dep:pyo3"]
 # Web/WASM: CLI-only & host-only deps are excluded from wasm32 targets.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clap = "4"
+# Shell completion generation (`dpa --generate-completion <shell>`).
+clap_complete = "4"
 libloading = "0.8"
 rayon = "1.10"
 walkdir = "2"
-# bzip2 (libbz2 C bindings — host-only, see compress.rs cfg gate)
+# bzip2 (libbz2 C bindings - host-only, see compress.rs cfg gate)
 bzip2 = { version = "0.4" }
 
 # v1.0 public-key analysis domain (analysis-only: no encrypt/sign). Host-only:
@@ -107,15 +109,27 @@ p256 = { version = "0.14", features = ["arithmetic", "ecdsa", "pkcs8"] }
 p384 = { version = "0.14", features = ["arithmetic", "ecdsa", "pkcs8"] }
 k256 = { version = "0.14", features = ["arithmetic", "ecdsa", "pkcs8"] }
 ecdsa = { version = "0.17", features = ["der", "alloc"] }
+# v1.1 GM/T (Chinese cryptography) enhancement: SM2 analysis/verification
+# (SM2-with-SM3) plus PKCS#8/SEC1 PEM/DER key handling. RustCrypto-family crate
+# on the same elliptic-curve 0.14 stack as p256/k256. Deliberately NO `pke`
+# (SM2 encryption is a cryptographic operation, out of the analysis-only scope).
+sm2 = { version = "0.14", default-features = false, features = ["dsa", "pem", "pkcs8", "std"] }
 
 # wasm32-unknown-unknown: rand needs getrandom with the js backend.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
+# Console codepage query for the one-time `chcp 65001` hint
+# (Win32 static FFI declarations only; the built binary stays dependency-free).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
 [dev-dependencies]
 # N3: property tests for parser surfaces (pem/hex/base64/asn1/json round-trips
 # and no-panic), see tests/proptest_parsers.rs. cargo-fuzz deferred to post-v1.0 CI.
 proptest = "1"
+# Exp: serde-saphyr migration probe (tests/saphyr_probe.rs) - dev-only, not in release graph.
+serde-saphyr = "1"
 
 [profile.release]
 opt-level = 3

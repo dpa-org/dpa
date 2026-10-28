@@ -14,7 +14,7 @@
 ## 构建与测试
 
 ```bash
-cargo build --release          # 产物：target/release/dpa-cli(.exe)
+cargo build --release          # 产物：target/release/dpa(.exe)
 cargo test --workspace
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings

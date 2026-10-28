@@ -63,8 +63,7 @@ dpa 不会自行查找插件：
    ```
 
    `stream` 字段填流式工厂函数；一次性处理整个输入的操作直接省略该字段
-   （不接受 `stream: None`）。`plugins/demo` 展示了两种路径，`plugins/ascii85`
-   是仅整块处理的例子。
+   （不接受 `stream: None`）。`plugins/demo` 展示了两种路径。
 
 3. 构建该 crate，然后用 `dpa --plugins <dir>` 加载生成的动态库。
 

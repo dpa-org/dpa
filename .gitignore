@@ -6,6 +6,9 @@
 /notes/
 
 # Debug logs and scratch output
+*.log
+report-*.txt
+__pycache__/
 build*.log
 build*.txt
 check*.log
@@ -20,6 +23,9 @@ build.err
 # Scratch directories
 /temp
 
+# Scratch file left by a local build probe
+/temp_build_out.txt
+
 # Plugin build artifacts
 plugins/*.dll
 plugins/*.so
@@ -29,6 +35,6 @@ plugins/.dpa-plugin-hashes.json
 # Release output
 /dist
 
-# Review notes and archives kept out of the published package
+# Archives and working notes kept out of the published package
 /output
 /archive

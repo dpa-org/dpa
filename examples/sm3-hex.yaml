@@ -1,0 +1,8 @@
+# SM3 digest of a hex-encoded blob (hex in -> hex out).
+# Use case: quickly fingerprint a hex dump / binary snippet with SM3.
+name: sm3-hex
+description: hex decode -> SM3 digest -> hex encode
+steps:
+  - op: dpa:hex:decode
+  - op: dpa:sm3
+  - op: dpa:hex:encode

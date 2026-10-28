@@ -60,7 +60,7 @@ pub fn ops() -> Vec<Op> {
                     name: "fhcrc",
                     required: false,
                     description: "op.gzip.compress.arg.fhcrc",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             gzip_compress,
@@ -166,7 +166,7 @@ pub fn ops() -> Vec<Op> {
             make_lzma_decompress
         ),
     ];
-    // bzip2 (libbz2 C bindings — host-only)
+    // bzip2 (libbz2 C bindings - host-only)
     #[cfg(not(target_arch = "wasm32"))]
     v.extend(bzip2_ops());
     v
@@ -474,6 +474,10 @@ impl StreamingOp for GzipCompressStream {
 
     fn finish(&mut self) -> anyhow::Result<Vec<u8>> {
         let mut out = Vec::new();
+        if !self.header_sent {
+            out.extend_from_slice(&build_gzip_header(&self.header_opts));
+            self.header_sent = true;
+        }
         loop {
             let empty: &[u8] = &[];
             let status = self

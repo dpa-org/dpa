@@ -24,7 +24,7 @@ steps:
 """
 print("run:", dpa.run(flow, b"hello dpa"))
 
-# 2) Batch: the same flow applied to several inputs.
+# 2) Batch: the same flow applied to several inputs (processed sequentially).
 outs = dpa.run_batch(
     "steps:\n  - op: dpa:sha256\n  - op: dpa:hex:encode\n",
     [b"a", b"b", b"c"],

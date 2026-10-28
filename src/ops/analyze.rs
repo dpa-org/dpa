@@ -28,19 +28,19 @@ pub fn ops() -> Vec<Op> {
                     name: "display_total",
                     required: false,
                     description: "op.extract.strings.arg.display_total",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "sort",
                     required: false,
                     description: "op.extract.strings.arg.sort",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "unique",
                     required: false,
                     description: "op.extract.strings.arg.unique",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             extract_strings
@@ -54,19 +54,19 @@ pub fn ops() -> Vec<Op> {
                     name: "display_total",
                     required: false,
                     description: "op.extract.urls.arg.display_total",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "sort",
                     required: false,
                     description: "op.extract.urls.arg.sort",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "unique",
                     required: false,
                     description: "op.extract.urls.arg.unique",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             extract_urls
@@ -80,19 +80,19 @@ pub fn ops() -> Vec<Op> {
                     name: "display_total",
                     required: false,
                     description: "op.extract.emails.arg.display_total",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "sort",
                     required: false,
                     description: "op.extract.emails.arg.sort",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "unique",
                     required: false,
                     description: "op.extract.emails.arg.unique",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             extract_emails
@@ -106,31 +106,31 @@ pub fn ops() -> Vec<Op> {
                     name: "ipv6",
                     required: false,
                     description: "op.extract.ips.arg.ipv6",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "remove_local",
                     required: false,
                     description: "op.extract.ips.arg.remove_local",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "display_total",
                     required: false,
                     description: "op.extract.ips.arg.display_total",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "sort",
                     required: false,
                     description: "op.extract.ips.arg.sort",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "unique",
                     required: false,
                     description: "op.extract.ips.arg.unique",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             extract_ips
@@ -150,19 +150,19 @@ pub fn ops() -> Vec<Op> {
                     name: "display_total",
                     required: false,
                     description: "op.extract.hashes.arg.display_total",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "sort",
                     required: false,
                     description: "op.extract.hashes.arg.sort",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "unique",
                     required: false,
                     description: "op.extract.hashes.arg.unique",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             extract_hashes
@@ -176,24 +176,36 @@ pub fn ops() -> Vec<Op> {
                     name: "display_total",
                     required: false,
                     description: "op.extract.domains.arg.display_total",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "sort",
                     required: false,
                     description: "op.extract.domains.arg.sort",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "unique",
                     required: false,
                     description: "op.extract.domains.arg.unique",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "underscore",
                     required: false,
                     description: "op.extract.domains.arg.underscore",
+                    format: crate::ops::ArgFormat::Bool,
+                },
+                ArgSpec {
+                    name: "filter_ext_tlds",
+                    required: false,
+                    description: "op.extract.domains.arg.filter_ext_tlds",
+                    format: crate::ops::ArgFormat::Bool,
+                },
+                ArgSpec {
+                    name: "extra_tld_blacklist",
+                    required: false,
+                    description: "op.extract.domains.arg.extra_tld_blacklist",
                     format: crate::ops::ArgFormat::Utf8,
                 },
             ],
@@ -208,19 +220,19 @@ pub fn ops() -> Vec<Op> {
                     name: "display_total",
                     required: false,
                     description: "op.extract.mac.arg.display_total",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "sort",
                     required: false,
                     description: "op.extract.mac.arg.sort",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "unique",
                     required: false,
                     description: "op.extract.mac.arg.unique",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             extract_macs
@@ -234,19 +246,19 @@ pub fn ops() -> Vec<Op> {
                     name: "display_total",
                     required: false,
                     description: "op.extract.dates.arg.display_total",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "sort",
                     required: false,
                     description: "op.extract.dates.arg.sort",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "unique",
                     required: false,
                     description: "op.extract.dates.arg.unique",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             extract_dates
@@ -286,13 +298,13 @@ pub fn ops() -> Vec<Op> {
                     name: "show_zero",
                     required: false,
                     description: "op.freq.distribution.arg.show_zero",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
                 ArgSpec {
                     name: "show_ascii",
                     required: false,
                     description: "op.freq.distribution.arg.show_ascii",
-                    format: crate::ops::ArgFormat::Utf8,
+                    format: crate::ops::ArgFormat::Bool,
                 },
             ],
             freq_distribution
@@ -460,7 +472,8 @@ fn is_local_ipv4(s: &str) -> bool {
         || (a == 169 && b == 254)
 }
 
-/// Hash length selector: 0 (default) means all lengths; otherwise 32/40/64/128.
+/// Hash length selector: 0 (default) means all lengths; otherwise
+/// 32/40/56/64/96/128 (MD5 / SHA-1 / SHA-224 / SHA-256 / SHA-384 / SHA-512).
 fn parse_hash_length(args: &HashMap<String, String>) -> anyhow::Result<Option<usize>> {
     let Some(v) = args.get("length") else {
         return Ok(None);
@@ -468,10 +481,41 @@ fn parse_hash_length(args: &HashMap<String, String>) -> anyhow::Result<Option<us
     let n = v.parse::<usize>().map_err(|e| {
         anyhow::anyhow!("{}", i18n::tf("err.min_not_num", &[e.to_string().as_str()]))
     })?;
-    if !matches!(n, 0 | 32 | 40 | 64 | 128) {
+    if !matches!(n, 0 | 32 | 40 | 56 | 64 | 96 | 128) {
         anyhow::bail!("{}", i18n::tf("err.min_range", &[v.as_str()]));
     }
     if n == 0 { Ok(None) } else { Ok(Some(n)) }
+}
+
+/// Candidate digest algorithms for a given hex length, mirroring the
+/// recognition table used by `analyze:hash`. The annotation is informational:
+/// candidates are not guaranteed to be unique across lengths.
+fn hash_candidates_for_len(n: usize) -> &'static [&'static str] {
+    match n {
+        8 => &["CRC-32", "Adler-32", "FNV-1a 32"],
+        16 => &["MD5", "MD4", "CRC-64"],
+        32 => &["MD5", "MD4", "RIPEMD-128"],
+        40 => &["SHA-1", "RIPEMD-160"],
+        48 => &["RIPEMD-192"],
+        56 => &["SHA-224", "SHA3-224", "BLAKE2s-224"],
+        64 => &[
+            "SHA-256",
+            "SHA3-256",
+            "BLAKE2s-256",
+            "BLAKE2b-256",
+            "SM3",
+            "Keccak-256",
+        ],
+        96 => &["SHA-384", "SHA3-384", "BLAKE2b-384"],
+        128 => &[
+            "SHA-512",
+            "SHA3-512",
+            "BLAKE2b-512",
+            "Keccak-512",
+            "Whirlpool",
+        ],
+        _ => &[],
+    }
 }
 
 /// Shared post-processing for extractors: optional sort / unique / display total.
@@ -582,9 +626,31 @@ fn extract_ips(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<V
 
     if want_v6 {
         let v6 = Regex::new(r"(?i)\b[0-9a-f:]{3,39}\b").unwrap();
+        let mut v6_spans: Vec<(usize, usize)> = Vec::new();
         for m in v6.find_iter(&s) {
             let t = m.as_str();
             if is_valid_ipv6(t) {
+                hits.push(t.to_string());
+                v6_spans.push((m.start(), m.end()));
+            }
+        }
+        // `:` is not a word character, so the `\b`-anchored regex above misses
+        // fully compressed forms that start or end with `::` (`::1`, `fe80::`).
+        // Capture those explicitly and deduplicate.
+        let v6c = Regex::new(
+            r"(?i)::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,5})?|(?:[0-9a-f]{1,4}:){1,6}::",
+        )
+        .unwrap();
+        for m in v6c.find_iter(&s) {
+            let t = m.as_str();
+            if !is_valid_ipv6(t) {
+                continue;
+            }
+            // Skip candidates that overlap a full-form match captured above
+            // (e.g. `::2` inside `2001:db8::2`); only standalone compressed
+            // forms like `::1` / `fe80::` are new hits.
+            let overlaps_full = v6_spans.iter().any(|&(a, b)| m.start() < b && a < m.end());
+            if !overlaps_full && !hits.iter().any(|h| h == t) {
                 hits.push(t.to_string());
             }
         }
@@ -598,14 +664,22 @@ fn extract_hashes(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resul
         Some(n) => Regex::new(&format!(r"\b[0-9a-fA-F]{{{}}}\b", n)).unwrap(),
         // Longest digest first so a SHA-512 blob is not chopped into MD5 pieces.
         None => Regex::new(
-            r"\b[0-9a-fA-F]{128}\b|\b[0-9a-fA-F]{64}\b|\b[0-9a-fA-F]{40}\b|\b[0-9a-fA-F]{32}\b",
+            r"\b[0-9a-fA-F]{128}\b|\b[0-9a-fA-F]{96}\b|\b[0-9a-fA-F]{64}\b|\b[0-9a-fA-F]{56}\b|\b[0-9a-fA-F]{40}\b|\b[0-9a-fA-F]{32}\b",
         )
         .unwrap(),
     };
     let s = String::from_utf8_lossy(input);
     let mut hits = Vec::new();
     for m in re.find_iter(&s) {
-        hits.push(m.as_str().to_string());
+        let h = m.as_str();
+        // Candidate annotation reuses the analyze:hash recognition table; the
+        // annotation is informational and not guaranteed to be unique.
+        let cands = hash_candidates_for_len(h.len());
+        if cands.is_empty() {
+            hits.push(h.to_string());
+        } else {
+            hits.push(format!("{} [{}]", h, cands.join("/")));
+        }
     }
     finish_hits(hits, args)
 }
@@ -621,6 +695,48 @@ fn is_valid_label_opt(s: &str, underscore: bool) -> bool {
         && (underscore || (!s.starts_with('_') && !s.ends_with('_')))
 }
 
+/// Common file extensions that frequently appear as the final label of a path
+/// or filename (e.g. `app.js`, `style.css`) and must not be treated as a TLD.
+/// This is a pragmatic guard: a full IANA TLD list would go stale and would
+/// still miss private suffixes, while these tokens cause the worst false
+/// positives in log and code extraction.
+const FILE_EXT_TLDS: &[&str] = &[
+    // Web frontend
+    "js", "mjs", "cjs", "ts", "tsx", "jsx", "vue", "svelte", "css", "scss", "sass", "less", "html",
+    "htm", "xhtml", "xml", "svg", "wasm", "map", "min", "lock", // Data / config
+    "json", "json5", "yaml", "yml", "toml", "ini", "cfg", "conf", "md", "markdown", "rst", "txt",
+    "log", "csv", "tsv", "sql", "db", "sqlite", "env", // Source code
+    "py", "pyw", "rs", "go", "java", "kt", "kts", "scala", "c", "h", "cpp", "hpp", "cc", "hh",
+    "cs", "fs", "php", "rb", "pl", "lua", "sh", "bash", "zsh", "fish", "bat", "cmd", "ps1", "psm1",
+    "vbs", // Binaries / archives
+    "exe", "dll", "so", "dylib", "sys", "bin", "o", "a", "lib", "obj", "class", "jar", "war",
+    "ear", "apk", "aab", "ipa", "deb", "rpm", "msi", "dmg", "iso", "img", "zip", "rar", "7z",
+    "tar", "gz", "bz2", "xz", "zst", "tgz", "tbz2", "txz", // Images
+    "png", "jpg", "jpeg", "gif", "bmp", "webp", "ico", "avif", "tif", "tiff", "psd",
+    // Documents
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "tex",
+    // Media
+    "mp3", "wav", "flac", "ogg", "oga", "opus", "m4a", "aac", "wma", "mp4", "mkv", "avi", "mov",
+    "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "3gp", // Fonts / misc
+    "ttf", "otf", "woff", "woff2", "eot", "bak", "tmp", "part",
+];
+
+fn is_blacklisted_tld(tld: &str, extra: &[String]) -> bool {
+    FILE_EXT_TLDS.contains(&tld) || extra.iter().any(|e| e == tld)
+}
+
+/// Parse `extra_tld_blacklist` (comma-separated, case-insensitive).
+fn parse_extra_tld_blacklist(args: &HashMap<String, String>) -> Vec<String> {
+    args.get("extra_tld_blacklist")
+        .map(|s| {
+            s.split(',')
+                .map(|x| x.trim().to_ascii_lowercase())
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 fn extract_domains(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     // Candidate FQDN: labels separated by dots, TLD 2+ alpha; excludes bare IPv4
     // (all-numeric labels) and trailing punctuation. `underscore` mirrors
@@ -630,6 +746,12 @@ fn extract_domains(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
             .map(String::as_str)
             .unwrap_or("false"),
     )?;
+    let filter_ext = crate::ops::parse_bool(
+        args.get("filter_ext_tlds")
+            .map(String::as_str)
+            .unwrap_or("true"),
+    )?;
+    let extra_blacklist = parse_extra_tld_blacklist(args);
     let label = if underscore {
         r"[a-z0-9_-]+"
     } else {
@@ -650,6 +772,12 @@ fn extract_domains(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
         if tok.bytes().any(|b| b.is_ascii_alphabetic())
             && tok.split('.').all(|l| is_valid_label_opt(l, underscore))
         {
+            if filter_ext {
+                let tld = tok.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+                if is_blacklisted_tld(&tld, &extra_blacklist) {
+                    continue;
+                }
+            }
             hits.push(tok.to_string());
         }
     }
@@ -711,10 +839,10 @@ fn extract_dates(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result
             // D/M/Y -> parts are d, m, y; treat as day-first like the regex intent.
             (parts[2], parts[1], parts[0])
         };
-        if let (Ok(yy), Ok(mm), Ok(dd)) = (y.parse::<i32>(), mo.parse::<u32>(), d.parse::<u32>()) {
-            if is_valid_date(yy, mm, dd) {
-                hits.push(tok.to_string());
-            }
+        if let (Ok(yy), Ok(mm), Ok(dd)) = (y.parse::<i32>(), mo.parse::<u32>(), d.parse::<u32>())
+            && is_valid_date(yy, mm, dd)
+        {
+            hits.push(tok.to_string());
         }
     }
     finish_hits(hits, args)
@@ -723,6 +851,77 @@ fn extract_dates(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result
 // ---------------------------------------------------------------------------
 // Detect file type (magic bytes)
 // ---------------------------------------------------------------------------
+
+/// Count occurrences of `pat` in `hay`.
+fn count_sub(hay: &[u8], pat: &[u8]) -> usize {
+    if pat.is_empty() || hay.len() < pat.len() {
+        return 0;
+    }
+    hay.windows(pat.len()).filter(|w| *w == pat).count()
+}
+
+/// Dominant newline style: CR (classic Mac), CRLF (Windows) or LF (Unix).
+fn newline_style(b: &[u8]) -> &'static str {
+    let lf = b.iter().filter(|&&c| c == b'\n').count();
+    let cr = b.iter().filter(|&&c| c == b'\r').count();
+    if lf == 0 && cr > 0 {
+        return "CR";
+    }
+    let crlf = count_sub(b, b"\r\n");
+    if crlf > 0 && crlf * 2 >= lf {
+        return "CRLF";
+    }
+    "LF"
+}
+
+/// Text sniffing fallback for files without a magic signature. Returns the
+/// encoding label when the buffer is plausibly plain text.
+fn sniff_text(input: &[u8]) -> Option<&'static str> {
+    // ASCII: printable ASCII plus common whitespace, no control bytes.
+    let ascii = input.iter().all(|&c| {
+        c == b'\t' || c == b'\n' || c == b'\r' || c == 0x0c || (0x20..=0x7e).contains(&c)
+    });
+    if ascii {
+        return Some("Plain text (ASCII)");
+    }
+    // UTF-8 without BOM.
+    if std::str::from_utf8(input).is_ok() {
+        return Some("Plain text (UTF-8)");
+    }
+    // UTF-16 without BOM: NUL bytes concentrated on one parity while the other
+    // parity is mostly printable ASCII (7-bit). Require a plausible size and a
+    // strong majority on one parity.
+    if input.len() >= 4 && input.len().is_multiple_of(2) {
+        let even_nuls = input
+            .iter()
+            .enumerate()
+            .filter(|&(i, c)| i % 2 == 0 && *c == 0)
+            .count();
+        let odd_nuls = input
+            .iter()
+            .enumerate()
+            .filter(|&(i, c)| i % 2 == 1 && *c == 0)
+            .count();
+        let half = input.len() / 2;
+        let ascii_parity = |parity: usize| {
+            input
+                .iter()
+                .enumerate()
+                .filter(|&(i, c)| i % 2 == parity && *c != 0)
+                .all(|x| {
+                    let c = x.1;
+                    *c == b'\t' || *c == b'\n' || *c == b'\r' || (0x20..=0x7e).contains(c)
+                })
+        };
+        if odd_nuls * 10 >= half * 8 && ascii_parity(0) {
+            return Some("Plain text (UTF-16 LE)");
+        }
+        if even_nuls * 10 >= half * 8 && ascii_parity(1) {
+            return Some("Plain text (UTF-16 BE)");
+        }
+    }
+    None
+}
 
 /// Magic-byte matchers in priority order: (name, matcher closure).
 /// Longer / more specific signatures come first so e.g. ZIP matches before OLE2.
@@ -793,7 +992,11 @@ fn detect_file_type(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Re
         }
     }
     if out.is_empty() {
-        out.extend_from_slice(b"Unknown file type");
+        if let Some(label) = sniff_text(input) {
+            out.extend_from_slice(format!("{} ({})", label, newline_style(input)).as_bytes());
+        } else {
+            out.extend_from_slice(b"Unknown file type");
+        }
         out.push(b'\n');
     }
     Ok(out)
@@ -861,10 +1064,9 @@ fn analyze_hash(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result
 // ---------------------------------------------------------------------------
 
 fn entropy(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    if input.is_empty() {
-        return Ok(b"0".to_vec());
-    }
     let scale = args.get("scale").map(|s| s.as_str()).unwrap_or("shannon");
+    // Empty input falls through with h = 0.0, so the output keeps the uniform
+    // "{:.6} {unit}" shape instead of a bare "0".
     let mut freq = [0u64; 256];
     for &b in input {
         freq[b as usize] += 1;
@@ -1188,6 +1390,28 @@ mod tests {
     }
 
     #[test]
+    fn ipv6_compressed_edge_cases_extracted() {
+        // Compressed forms whose start/end is a ':' (not a word
+        // boundary) must still be extracted, e.g. from URLs or bare loopback.
+        let input = b"link http://[fe80::1]:8080/a and loopback ::1";
+        let out = text(&run("dpa:extract:ips", input, &[("ipv6", "true")]));
+        assert!(out.contains("fe80::1"), "got: {}", out);
+        assert!(out.contains("::1"), "got: {}", out);
+    }
+
+    #[test]
+    fn ipv6_compressed_not_duplicated_inside_full_form() {
+        // A compressed candidate nested inside a full-form address (`::2`
+        // inside `2001:db8::2`) must not be reported as a separate hit.
+        let input = b"mix 2001:db8::2 and 2001:db8::1";
+        let out = text(&run("dpa:extract:ips", input, &[("ipv6", "true")]));
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 2, "got: {}", out);
+        assert!(lines.contains(&"2001:db8::2"), "got: {}", out);
+        assert!(lines.contains(&"2001:db8::1"), "got: {}", out);
+    }
+
+    #[test]
     fn hashes_extracted_longest_first() {
         let sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         let md5 = "d41d8cd98f00b204e9800998ecf8427e";
@@ -1219,6 +1443,20 @@ mod tests {
         assert_eq!(
             text(&run("dpa:entropy", b"ABAB", &[("scale", "base256")])),
             "0.125000 bytes per byte"
+        );
+    }
+
+    #[test]
+    fn entropy_empty_input_uses_consistent_format() {
+        // Empty input must render with the same "{:.6} {unit}"
+        // format as non-empty input instead of a bare "0".
+        assert_eq!(
+            text(&run("dpa:entropy", b"", &[])),
+            "0.000000 bits per byte"
+        );
+        assert_eq!(
+            text(&run("dpa:entropy", b"", &[("scale", "base10")])),
+            "0.000000 decimal digits per byte"
         );
     }
 
@@ -1271,6 +1509,33 @@ mod tests {
     }
 
     #[test]
+    fn domains_filter_file_extension_pseudo_tlds() {
+        // File paths like app.js / style.css must not be reported as domains.
+        let input = b"GET /static/app.js and style.css and example.com and a.min.js";
+        let out = text(&run("dpa:extract:domains", input, &[]));
+        assert!(!out.contains("app.js"), "got: {}", out);
+        assert!(!out.contains("style.css"), "got: {}", out);
+        assert!(!out.contains("a.min.js"), "got: {}", out);
+        assert!(out.contains("example.com"), "got: {}", out);
+        // filter_ext_tlds=false restores the old permissive behavior.
+        let out = text(&run(
+            "dpa:extract:domains",
+            b"GET /static/app.js",
+            &[("filter_ext_tlds", "false")],
+        ));
+        assert!(out.contains("app.js"), "got: {}", out);
+        // Extra blacklist drops user-specified pseudo-TLDs.
+        let out = text(&run(
+            "dpa:extract:domains",
+            b"foo.internal and bar.corp and example.com",
+            &[("extra_tld_blacklist", "internal,corp")],
+        ));
+        assert!(!out.contains("foo.internal"), "got: {}", out);
+        assert!(!out.contains("bar.corp"), "got: {}", out);
+        assert!(out.contains("example.com"), "got: {}", out);
+    }
+
+    #[test]
     fn macs_extracted_three_notations() {
         let input = b"a:b 00:1A:2B:3C:4D:5E dash 66-77-88-99-AA-BB cisco 0011.2233.4455 bad 00:00:00:00:00:00";
         let out = text(&run("dpa:extract:mac", input, &[]));
@@ -1303,9 +1568,16 @@ mod tests {
         let zip: &[u8] = b"PK\x03\x04...";
         let out = text(&run("dpa:analyze:file:type", zip, &[]));
         assert!(out.contains("ZIP archive"), "got: {}", out);
-        let unknown = b"just some text";
+        let unknown = b"\x00\x01\x02\x03\xff\xfe\xfd\xfc";
         let out = text(&run("dpa:analyze:file:type", unknown, &[]));
         assert!(out.contains("Unknown file type"), "got: {}", out);
+        // Text sniffing fallback: ASCII, UTF-8 and newline style are detected.
+        let out = text(&run("dpa:analyze:file:type", b"just some text", &[]));
+        assert!(out.contains("Plain text (ASCII) (LF)"), "got: {}", out);
+        let out = text(&run("dpa:analyze:file:type", "中文内容".as_bytes(), &[]));
+        assert!(out.contains("Plain text (UTF-8) (LF)"), "got: {}", out);
+        let out = text(&run("dpa:analyze:file:type", b"line1\r\nline2\r\n", &[]));
+        assert!(out.contains("Plain text (ASCII) (CRLF)"), "got: {}", out);
     }
 
     #[test]

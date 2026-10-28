@@ -1,0 +1,20 @@
+#!/bin/sh
+# Keep the embedded git hash in `dpa --version` fresh after commits.
+#
+# Why: `cargo`'s `rerun-if-changed` cannot be relied on to watch files under
+# `.git/` (verified on Windows: even touching `.git/refs/heads/main` after a
+# commit does not make cargo rerun build.rs). build.rs therefore re-reads HEAD
+# only when cargo decides to rerun it. Touching `build.rs` changes its mtime,
+# which cargo *does* track reliably, forcing a build.rs rerun on the next
+# build and a re-embedded commit hash.
+#
+# Touching build.rs only updates the mtime; git tracks content, so a touch
+# never makes the working tree dirty.
+#
+# Install with:
+#   git config core.hooksPath .githooks
+# (see scripts/setup-git-hooks.ps1)
+if [ -f build.rs ]; then
+  touch build.rs
+fi
+exit 0

@@ -1,4 +1,4 @@
-//! API contract tests (review P3 §3-P9 / G8).
+//! API contract tests.
 //!
 //! dpa exposes a library surface (`lib.rs`) shared by the CLI, the WASM crate
 //! and the Python binding. These tests pin the *public contract* so a refactor
@@ -16,12 +16,21 @@ use dpa::recipe::{self, Format};
 #[test]
 fn engine_public_surface_is_stable() {
     // Compile-level pin: these must exist with the same shapes.
-    let _: fn(&Flow, &[u8], OutputFormat) -> anyhow::Result<Vec<u8>> = engine::process_bytes;
-    let _: fn(&Flow, &[u8], OutputFormat) -> anyhow::Result<Vec<u8>> = engine::process_bytes_stream;
-    let _: fn(usize) = engine::set_max_input_bytes;
-    let _: fn() -> usize = engine::max_input_bytes;
-    let _: fn(bool) = engine::set_verbose;
-    let _: fn() -> bool = engine::is_verbose;
+    type ProcessFn =
+        fn(&Flow, &[u8], OutputFormat, &engine::EngineConfig) -> anyhow::Result<Vec<u8>>;
+    let _: ProcessFn = engine::process_bytes;
+    let _: ProcessFn = engine::process_bytes_stream;
+    // EngineConfig replaces the process-wide setters; pin its surface so
+    // callers (CLI / pyo3 / wasm) keep working after the migration.
+    let _: fn(&engine::EngineConfig) -> usize = engine::EngineConfig::max_input_bytes;
+    let _: fn(&engine::EngineConfig) -> usize = engine::EngineConfig::max_step_output_bytes;
+    let _: fn(&engine::EngineConfig) -> bool = engine::EngineConfig::verbose;
+    let _: fn(engine::EngineConfig, usize) -> engine::EngineConfig =
+        engine::EngineConfig::with_max_input_bytes;
+    let _: fn(engine::EngineConfig, usize) -> engine::EngineConfig =
+        engine::EngineConfig::with_max_step_output_bytes;
+    let _: fn(engine::EngineConfig, bool) -> engine::EngineConfig =
+        engine::EngineConfig::with_verbose;
 }
 
 #[test]
@@ -81,7 +90,7 @@ fn op_shape_contract_is_stable() {
 fn recipe_format_contract_is_stable() {
     let _: fn(&str) -> Option<Format> = Format::parse;
     let _: fn(&str) -> Format = recipe::detect_format;
-    // Auto-detection (review P3 §3-N) must tolerate BOM / leading whitespace.
+    // Auto-detection must tolerate BOM / leading whitespace.
     assert_eq!(
         recipe::detect_format("\u{feff}https://example.com/x.txt"),
         Format::Url

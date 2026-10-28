@@ -2,11 +2,12 @@
 name = "dpa-wasm"
 version = "1.0.0"
 edition = "2024"
-description = "dpa Web/WASM engine binding — reuses dpa's Rust engine (engine/ops/i18n) on wasm32"
+description = "dpa Web/WASM engine binding - reuses dpa's Rust engine (engine/ops/i18n) on wasm32"
 license = "Apache-2.0"
 repository = "https://github.com/dpa-org/dpa"
 authors = ["dpa-org"]
-rust-version = "1.85"
+rust-version = "1.89"
+publish = false
 
 [lib]
 name = "dpa_wasm"
@@ -17,5 +18,4 @@ anyhow = "1"
 dpa = { path = ".." }
 js-sys = "0.3"
 serde_json = "1"
-serde_yaml = "0.9"
 wasm-bindgen = "0.2"

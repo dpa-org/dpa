@@ -5,6 +5,7 @@ edition = "2021"
 description = "Official sample plugin for the dpa plugin ABI (see docs/PLUGIN.md)"
 authors = ["dpa-org"]
 license = "Apache-2.0"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]

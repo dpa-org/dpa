@@ -68,7 +68,7 @@ impl Format {
     }
 }
 
-/// Auto-detect a recipe format from input text (review §3-N). A UTF-8 BOM
+/// Auto-detect a recipe format from input text. A UTF-8 BOM
 /// (`\u{FEFF}`) and leading whitespace are stripped before deciding, so a
 /// BOM-prefixed JSON recipe is no longer misclassified as Chef.
 pub fn detect_format(input: &str) -> Format {
@@ -338,9 +338,21 @@ pub fn from_chef(s: &str) -> Result<Vec<RecipeOp>> {
                 }
                 i += consumed;
                 if consumed == 0 {
-                    // Unknown suffix: skip the token
+                    // Not a flag. Official CyberChef separates ops with '/':
+                    // if a parenthesised group follows, this is the start of
+                    // the next op and must be parsed normally. A bare suffix
+                    // (no parens) stays ignored to match official behaviour.
+                    let token_start = i;
                     while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
                         i += 1;
+                    }
+                    let mut j = i;
+                    while j < b.len() && b[j].is_ascii_whitespace() {
+                        j += 1;
+                    }
+                    if j < b.len() && b[j] == b'(' {
+                        i = token_start;
+                        break;
                     }
                 }
             } else {
@@ -604,6 +616,26 @@ mod tests {
         let ops = from_chef("A('x')/wat").unwrap();
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].op, "A");
+    }
+
+    #[test]
+    fn chef_official_slash_separated_ops() {
+        // Official CyberChef exports separate ops with '/'. A parenthesised
+        // group after '/' is the next op, not an unknown suffix.
+        let ops = from_chef("To_Base64('A-Za-z0-9+/=')/Fork('\\\\n',false)").unwrap();
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].op, "To Base64");
+        assert_eq!(ops[0].args, vec![Value::String("A-Za-z0-9+/=".into())]);
+        assert_eq!(ops[1].op, "Fork");
+        assert_eq!(
+            ops[1].args,
+            vec![Value::String("\\n".into()), Value::Bool(false)]
+        );
+        // flags still work when followed by another op
+        let ops = from_chef("Fork('\\\\n',false)/breakpointLabel('base64')/disabled").unwrap();
+        assert_eq!(ops.len(), 2);
+        assert!(ops[0].breakpoint);
+        assert!(ops[1].disabled);
     }
 
     #[test]

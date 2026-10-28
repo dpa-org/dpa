@@ -150,6 +150,7 @@ err.op_not_found = Op '{}' not found (run `dpa list` to see all ops)
 err.invalid_category = Unknown category '{}' (available: {}); use `dpa list -c <category>`
 err.out_rel_conflict = Output relative path '{}' conflicts between '{}' and '{}'; use distinct file names or separate output directories
 err.parse_flow_failed = Failed to parse flow file: {}
+hint.flow_shape = A flow is a YAML document with `ops: [{op: <name>, args: {...}}]` (see README)
 err.path_index = Path index is invalid: [{}]
 err.path_not_found_idx = Path not found: [{}]
 err.path_not_found_key = Path not found: {}
@@ -174,8 +175,8 @@ err.proto_bad_tls = Invalid TLS record
 err.proto_bad_hex = Input is not a valid hex string
 err.proto_truncated = Input too short for {} header (need {} bytes, got {})
 err.rc4_key_len = RC4 key length must be 1..=256 bytes (got {})
-err.read_flow_failed = Failed to read flow file: {}
-err.read_input_failed = Failed to read input file: {}
+err.read_flow_failed = Failed to read flow file '{}': {}
+err.read_input_failed = Failed to read input file '{}': {}
 err.read_pkg_failed = Failed to read package file: {}
 err.regex_compile = Regex compile failed: {}
 err.sm4_decrypt = SM4 decrypt failed (key/iv/ciphertext mismatch or corruption): {}
@@ -189,6 +190,8 @@ err.stream_finished = Stream already finished
 err.stream_read_failed = Failed to read input stream: {}
 err.system_time = System time error: {}
 err.tea_key_len = TEA family key must be 16 bytes (got {})
+err.tea_block_misaligned = TEA input length not aligned to 8-byte block; use padding=pkcs7 or none
+err.tea_bad_padding = TEA padding check failed (key or mode mismatch)
 err.thread_pool = Failed to create thread pool: {}
 err.top_not_num = Argument 'top' is not a valid number: {}
 err.uuid_bad_namespace = Invalid namespace UUID '{}'
@@ -279,6 +282,7 @@ cli.flow_manifest_about = Show flow manifest and op dependencies
 cli.input_help = Input file/dir; '-' or omitted reads stdin. Directories expand to all contained files (see --recursive)
 cli.jobs_help = Number of parallel files; 0 = auto by CPU cores
 cli.lang_help = Language for user-facing messages: en | zh-CN (default: en)
+cli.version_help = Print version and exit
 cli.list_about = List available ops
 cli.list_group_help = Group operations by family | kind | category
 cli.list_search_help = Filter ops by keyword (name / category / family / kind / description)
@@ -289,8 +293,15 @@ cli.op_run_about = Run a single op on an input, without a flow file
 cli.op_run_name_help = Op identifier, e.g. dpa:base64:decode (see `dpa list`)
 cli.op_run_args_help = Op arguments and input; `dpa op <name> --help` lists the arguments for that op
 err.unknown_op_name = Unknown op '{}' (run `dpa list` to see all ops)
+err.op_missing_name = Missing op name (run `dpa list` to see all ops)
 err.op_arg_reserved = Op '{}' declares argument '{}', which is reserved by the `dpa op` command
+err.clap.missing_value = Missing value: {}
+err.clap.invalid_value = Invalid value: {}
+err.clap.unknown_argument = Unknown argument: {}
+err.clap.invalid_subcommand = Unknown subcommand: {}
 cli.output_format_help = Output format: raw | hex (default raw, overridable by the flow's output field)
+cli.hex_help = Shorthand for --output-format hex
+cli.common_options_heading = Common options
 cli.output_help = Output file (single input) or output directory (multi/dir input), auto-created
 cli.pkg_help = Package file (.dpaflow)
 cli.plugins_help = Directory containing dpa plugin shared libraries (.dll/.so/.dylib) to load
@@ -329,7 +340,8 @@ msg.op_input = Input: {}
 msg.op_output = Output: {}
 
 # --- op_descs (structured keys, value = English original) ---
-op.adler32.desc = Adler-32 checksum (RFC 1950; big-endian 4 bytes)
+op.adler32.desc = Adler-32 checksum (RFC 1950; big-endian 4 bytes; hex via dpa:hex:encode)
+
 op.aes.decrypt.desc = AES decrypt (mode: ecb/cbc/cfb/ofb/ctr/gcm; PKCS#7 for block modes)
 op.aes.encrypt.desc = AES encrypt (mode: ecb/cbc/cfb/ofb/ctr/gcm; PKCS#7 for block modes)
 op.analyze.file.type.desc = Detect file type from magic bytes
@@ -355,13 +367,30 @@ op.bitwise.rotate-left.desc = Bitwise rotate left each byte by N bits (1-7)
 op.bitwise.rotate-right.desc = Bitwise rotate right each byte by N bits (1-7)
 op.bitwise.shift-left.desc = Bitwise left shift each byte by N bits (1-7, zero fill)
 op.bitwise.shift-right.desc = Bitwise right shift each byte by N bits (1-7, zero fill)
-op.blake2b.256.desc = BLAKE2b digest, 256-bit output (raw bytes)
-op.blake2b.512.desc = BLAKE2b-512 digest (raw bytes)
-op.blake2b.384.desc = BLAKE2b-384 digest (raw bytes)
-op.blake2s.256.desc = BLAKE2s-256 digest (raw bytes)
-op.md4.desc = MD4 digest (raw bytes)
-op.xxhash32.desc = XXHash32 checksum (raw 4 bytes, seed 0)
-op.xxhash64.desc = XXHash64 checksum (raw 8 bytes, seed 0)
+op.bitwise.xor.arg.key = Key byte(s), cycled over input
+op.bitwise.xor.desc = Bitwise XOR each byte with a key byte (cyclic)
+op.blake2b.256.desc = BLAKE2b digest, 256-bit output (raw bytes; hex via dpa:hex:encode)
+
+op.blake2b.512.desc = BLAKE2b-512 digest (raw bytes; hex via dpa:hex:encode)
+
+op.blake2b.384.desc = BLAKE2b-384 digest (raw bytes; hex via dpa:hex:encode)
+
+op.blake2s.256.desc = BLAKE2s-256 digest (raw bytes; hex via dpa:hex:encode)
+
+op.count.arg.mode = Count mode: substring (default) or lines (wc -l style)
+op.hotp.arg.algo = HMAC algorithm: sha1 (default) / sha256 / sha512
+op.md4.desc = MD4 digest (raw bytes; hex via dpa:hex:encode)
+
+op.sha3.224.desc = SHA3-224 digest (raw bytes; hex via dpa:hex:encode)
+op.sha3.384.desc = SHA3-384 digest (raw bytes; hex via dpa:hex:encode)
+op.timestamp.to.date.arg.unit = Input unit: s (default) / ms / us / ns
+op.totp.arg.algo = HMAC algorithm: sha1 (default) / sha256 / sha512
+op.xxhash32.arg.seed = XXHash32 seed (default 0)
+op.xxhash32.desc = XXHash32 checksum (raw 4 bytes, seed 0; hex via dpa:hex:encode)
+
+op.xxhash64.arg.seed = XXHash64 seed (default 0)
+op.xxhash64.desc = XXHash64 checksum (raw 8 bytes, seed 0; hex via dpa:hex:encode)
+
 op.blowfish.decrypt.desc = Blowfish decrypt (mode: ecb/cbc/cfb/ofb/ctr; PKCS#7 for block modes)
 op.blowfish.encrypt.desc = Blowfish encrypt (mode: ecb/cbc/cfb/ofb/ctr; PKCS#7 for block modes)
 op.brotli.compress.desc = Brotli compress (RFC 7932)
@@ -371,17 +400,22 @@ op.bzip2.compress.arg.quality = Compression level (1-9, default 9)
 op.bzip2.decompress.desc = Bzip2 decompress
 op.byteswap.desc = Swap byte order within width-byte groups (2/4/8; trailing bytes kept as-is)
 op.chacha20.desc = ChaCha20 stream cipher (symmetric; run twice to decrypt)
+op.chacha20.decrypt.desc = ChaCha20 stream cipher decrypt (runs encryption twice, per the symmetric design)
 op.charcode.decode.desc = Code points to Unicode chars (decimal/hex/octal/binary, whitespace/comma tolerated)
 op.charcode.encode.desc = Unicode chars to code points (configurable delimiter and base)
 op.count.desc = Count occurrences of a substring (non-overlapping)
-op.crc16.desc = CRC-16 checksum (variant: arc/modbus/ccitt-false/xmodem/usb/maxim/ccitt-true/kermit/x-25/dnp/buypass/gsm/dect-r/riello/spi-fujitsu/t10-dif/teledisk/genibus/ibm-3740/ibm-sdlc/mcrf4xx/custom; big-endian 2 bytes)
-op.crc32.desc = CRC-32 checksum (variant: pkzip/iso-hdlc/bzip2/mpeg-2/posix/xfer/jamcrc/c/d/q/xz/autosar/custom; big-endian 4 bytes)
-op.crc32c.desc = CRC-32C checksum (variant: castagnoli/iscsi/nvme/custom; big-endian 4 bytes)
+op.crc16.desc = CRC-16 checksum (variant: arc/modbus/ccitt-false/xmodem/usb/maxim/ccitt-true/kermit/x-25/dnp/buypass/gsm/dect-r/riello/spi-fujitsu/t10-dif/teledisk/genibus/ibm-3740/ibm-sdlc/mcrf4xx/custom; big-endian 2 bytes; hex via dpa:hex:encode)
+
+op.crc32.desc = CRC-32 checksum (variant: pkzip/iso-hdlc/bzip2/mpeg-2/posix/xfer/jamcrc/c/d/q/xz/autosar/custom; big-endian 4 bytes; hex via dpa:hex:encode)
+
+op.crc32c.desc = CRC-32C checksum (variant: castagnoli/iscsi/nvme/custom; big-endian 4 bytes; hex via dpa:hex:encode)
+
 op.csr.parse.desc = Parse a PKCS#10 Certificate Signing Request (PEM or DER) and emit a JSON summary: subject, public key info, signature algorithm and signature validation
 op.csv.to-json.desc = Convert CSV (first row as headers) to a compact JSON array of objects
 op.datetime.delta.desc = Time difference between two datetime lines (seconds + human readable)
 op.datetime.delta.arg.operation = Operation: diff (subtract two datetime lines, default) / delta (first line + second line duration offset)
 op.datetime.parse.desc = Parse datetime strings (one per line) and normalize to RFC3339 UTC
+op.datetime.parse.arg.on_error = Error handling for invalid lines: fail (default, whole batch fails) / skip (drop invalid lines and append a summary)
 op.datetime.translate.desc = Translate a datetime string to the target strftime format
 op.decimal.decode.desc = Decimal to bytes (whitespace/comma separated, values 0-255, configurable delimiter)
 op.decimal.encode.desc = Bytes to decimal (configurable delimiter)
@@ -403,20 +437,27 @@ op.entropy.desc = Shannon entropy of input bytes (bits per byte)
 op.extract.dates.desc = Extract dates (ISO YYYY-MM-DD and common D/M/Y formats)
 op.extract.domains.desc = Extract domain names (excludes bare IP addresses)
 op.extract.emails.desc = Extract email addresses
-op.extract.hashes.desc = Extract hash digests (MD5/SHA1/SHA256/SHA512)
+op.extract.hashes.desc = Extract hash-like digests and annotate candidate algorithms (MD5, SHA1, SHA224, SHA256, SHA384, SHA512, SHA3/SM3/BLAKE2...; annotation is not a unique identification)
 op.extract.ips.desc = Extract IP addresses (IPv4; optional IPv6)
 op.extract.mac.desc = Extract MAC addresses (colon, dash, or Cisco dotted)
 op.extract.strings.desc = Extract printable ASCII strings (Unix strings style)
 op.extract.urls.desc = Extract URLs
 op.filetime.desc = Current Windows FILETIME (100ns ticks since 1601-01-01; little-endian hex)
 op.filetime.arg.format = Output format: hex (little-endian, default) / dec
+op.filetime.from.unix.desc = Unix time (s/ms/us) to Windows FILETIME (100ns ticks since 1601-01-01; little-endian hex)
+op.filetime.from.unix.arg.unit = Input unit: s (default) / ms / us
+op.filetime.from.unix.arg.format = Output format: hex (little-endian, default) / dec
 op.filetime.to.date.desc = Windows FILETIME (LE hex '0x..' or decimal) to UTC date string
 op.filetime.to.date.arg.unit = Input unit: ticks (default) / us / ms / s
 op.filter.desc = Filter lines containing a substring
-op.fletcher16.desc = Fletcher-16 checksum (big-endian 2 bytes)
-op.fletcher32.desc = Fletcher-32 checksum (big-endian 4 bytes)
-op.fletcher8.desc = Fletcher-8 checksum (nibble sums modulo 15, 1 byte)
-op.fletcher64.desc = Fletcher-64 checksum (LE word sums modulo 0xFFFFFFFF, 8 bytes)
+op.fletcher16.desc = Fletcher-16 checksum (big-endian 2 bytes; hex via dpa:hex:encode)
+
+op.fletcher32.desc = Fletcher-32 checksum (big-endian 4 bytes; hex via dpa:hex:encode)
+
+op.fletcher8.desc = Fletcher-8 checksum (nibble sums modulo 15, 1 byte; hex via dpa:hex:encode)
+
+op.fletcher64.desc = Fletcher-64 checksum (LE word sums modulo 0xFFFFFFFF, 8 bytes; hex via dpa:hex:encode)
+
 op.fork.desc = Fork: split on separator and run remaining steps per segment (engine-level)
 op.freq.distribution.desc = Byte frequency distribution (count + percentage, descending)
 op.gzip.compress.desc = gzip compress
@@ -424,7 +465,6 @@ op.gzip.decompress.desc = gzip decompress
 op.head.desc = Take first N lines
 op.hex.decode.desc = Hex to bytes (tolerant of whitespace and configurable delimiter)
 op.hex.encode.desc = Bytes to hex (configurable delimiter, case and line wrapping)
-op.hex.to.pem.desc = Decode hex bytes and wrap them in a PEM block (label selects the type tag)
 op.hexdump.decode.desc = Hexdump decode (hexdump -C rows, comma-separated bytes or bare hex)
 op.hexdump.encode.desc = Hexdump encode (hexdump -C style: offset, hex, ASCII)
 op.hkdf.desc = HKDF key derivation (RFC 5869)
@@ -439,16 +479,20 @@ op.json.to-csv.desc = Convert a JSON array of objects to CSV (union of keys as h
 op.json.to-xml.desc = JSON to XML text (keys #text for text, @name for attributes, arrays repeat elements)
 op.json.to-yaml.desc = JSON document to YAML text
 op.jwk.to.pem.desc = Convert a JSON Web Key (JWK, RSA or EC public key) into a PEM public key
-op.keccak.desc = Keccak digest (variant: 224/256/384/512, default 256; raw bytes)
-op.lm-hash.desc = LM hash (DES of uppercase 14-byte key; raw 16 bytes)
+op.keccak.desc = Keccak digest (variant: 224/256/384/512, default 256; raw bytes; hex via dpa:hex:encode)
+
+op.lm-hash.desc = LM hash (DES of uppercase 14-byte key; raw 16 bytes; hex via dpa:hex:encode)
+
 op.lzma.compress.desc = LZMA / XZ compress (format: xz or lzma)
 op.lzma.compress.arg.format = Container format (xz or lzma, default xz)
 op.lzma.decompress.desc = LZMA / XZ decompress (format: xz or lzma)
 op.lzma.decompress.arg.format = Container format (xz or lzma, default xz)
 op.lower.desc = ASCII to lowercase (non-ASCII bytes unchanged)
-op.md5.desc = MD5 digest (raw bytes; pair with dpa:hex:encode to display)
+op.md5.desc = MD5 digest (raw bytes; hex via dpa:hex:encode)
+
 op.not.desc = Bitwise NOT (invert every byte)
-op.nt-hash.desc = NT hash (MD4 of UTF-16LE password; raw 16 bytes)
+op.nt-hash.desc = NT hash (MD4 of UTF-16LE password; raw 16 bytes; hex via dpa:hex:encode)
+
 op.octal.decode.desc = Octal to bytes (3 digits per byte, tolerant of whitespace and delimiter)
 op.octal.encode.desc = Bytes to octal (3 digits per byte, configurable delimiter)
 op.parse.ethernet.desc = Parse an Ethernet frame: destination/source MAC, EtherType, payload length
@@ -463,7 +507,6 @@ op.parse.udp.desc = Parse a UDP datagram header: src/dst port, length, checksum
 op.parse.udp.arg.input_type = Input type: auto / hex / raw (default raw)
 op.pbkdf2.desc = PBKDF2 key derivation (HMAC-SHA1/SHA256/SHA512)
 op.pem.desc = PEM envelope encode/decode: action=decode strips the PEM header and base64 to raw DER bytes; action=encode wraps raw DER bytes in a PEM block (label selects the type tag)
-op.pem.to.hex.desc = Decode a PEM envelope (or pass through raw DER) and emit the DER bytes as lowercase hex
 op.pem.to.jwk.desc = Convert a PEM public key (RSA or EC) into a JSON Web Key (JWK)
 op.pkcs1.to.pkcs8.desc = Convert a PKCS#1 RSA PEM key (RSA PRIVATE KEY / RSA PUBLIC KEY) into PKCS#8 PEM (PRIVATE KEY / PUBLIC KEY)
 op.pkcs8.to.pkcs1.desc = Convert a PKCS#8 PEM key (PRIVATE KEY / PUBLIC KEY, RSA) back into PKCS#1 PEM (RSA PRIVATE KEY / RSA PUBLIC KEY)
@@ -475,11 +518,13 @@ op.qp.encode.desc = Quoted-printable encode (RFC 2045, =XX escapes, soft line br
 op.random.desc = Generate random raw bytes (non-printable; pipe into hex/utf8:escape to view)
 op.random.hex.desc = Generate random bytes as a hex string
 op.rc4.desc = RC4 stream cipher (symmetric; run twice to decrypt)
+op.rc4.decrypt.desc = RC4 stream cipher decrypt (runs encryption twice, per the symmetric design)
 op.regex.match.desc = Regex match, return all hits (one per line)
 op.regex.replace.desc = Regex replace all hits
 op.replace.desc = Replace substring (UTF-8 byte sequence)
 op.reverse.desc = Reverse byte sequence
-op.ripemd160.desc = RIPEMD-160 digest (raw bytes)
+op.ripemd160.desc = RIPEMD-160 digest (raw bytes; hex via dpa:hex:encode)
+
 op.ripemd160.arg.size = Digest size: 128 / 160 / 256 / 320 (default 160)
 err.ripemd160.size = Unknown RIPEMD size '{}' (supported: 128 / 160 / 256 / 320)
 op.rot13.bruteforce.desc = ROT13 brute force (all 25 Caesar shifts; top candidates by text score)
@@ -493,31 +538,52 @@ op.rsa.verify.desc = Verify an RSA signature (PKCS#1 v1.5 or PSS) over the input
 op.sets.difference.desc = Set difference A - B (input A<sep>B)
 op.sets.intersection.desc = Intersection of two line sets (input A<sep>B)
 op.sets.union.desc = Union of two line sets (input A<sep>B, lines preserved in order)
-op.sha1.desc = SHA-1 digest (raw bytes)
+op.sha1.desc = SHA-1 digest (raw bytes; hex via dpa:hex:encode)
+
 op.sha1.arg.rounds = Digest iterations (repeat the hash N times; default 1)
-op.sha224.desc = SHA-224 digest (raw bytes)
+op.sha224.desc = SHA-224 digest (raw bytes; hex via dpa:hex:encode)
+
 op.sha224.arg.rounds = Digest iterations (repeat the hash N times; default 1)
-op.sha256.desc = SHA-256 digest (raw bytes)
+op.sha256.desc = SHA-256 digest (raw bytes; hex via dpa:hex:encode)
+
 op.sha256.arg.rounds = Digest iterations (repeat the hash N times; default 1)
-op.sha3.256.desc = SHA3-256 digest (raw bytes)
-op.sha3.512.desc = SHA3-512 digest (raw bytes)
-op.whirlpool.desc = Whirlpool digest (raw bytes, ISO/IEC 10118-3)
-op.sha384.desc = SHA-384 digest (raw bytes)
+op.sha3.256.desc = SHA3-256 digest (raw bytes; hex via dpa:hex:encode)
+
+op.sha3.512.desc = SHA3-512 digest (raw bytes; hex via dpa:hex:encode)
+
+op.whirlpool.desc = Whirlpool digest (raw bytes, ISO/IEC 10118-3; hex via dpa:hex:encode)
+
+op.sha384.desc = SHA-384 digest (raw bytes; hex via dpa:hex:encode)
+
 op.sha384.arg.rounds = Digest iterations (repeat the hash N times; default 1)
-op.sha512.desc = SHA-512 digest (raw bytes)
+op.sha512.desc = SHA-512 digest (raw bytes; hex via dpa:hex:encode)
+
 op.sha512.arg.rounds = Digest iterations (repeat the hash N times; default 1)
-op.shake.desc = SHAKE XOF digest (variant: 128/256, default 256; raw bytes, length bytes)
+op.shake.desc = SHAKE XOF digest (variant: 128/256, default 256; raw bytes, length bytes; hex via dpa:hex:encode)
+
 op.similarity.jaccard.desc = Jaccard similarity of two line sets (input A<sep>B)
-op.sm3.desc = SM3 digest (raw bytes; GB/T 32905)
+op.sm3.desc = SM3 digest (raw bytes; GB/T 32905; hex via dpa:hex:encode)
+
 op.sm3.arg.rounds = Digest iterations (repeat the hash N times; default 1)
 op.sm4.decrypt.desc = SM4 decrypt (mode: ecb/cbc/cfb/ofb/ctr; PKCS#7 for block modes)
 op.sm4.encrypt.desc = SM4 encrypt (mode: ecb/cbc/cfb/ofb/ctr; PKCS#7 for block modes)
-op.sort.desc = Sort input bytes (byte value order)
+op.sm2.parse.desc = Parse SM2 public key (hex/raw; uncompressed point or x,y)
+op.sm2.parse.arg.raw = Raw bytes (compressed/uncompressed point)
+op.sm2.pubkey.extract.desc = Extract SM2 public key from private key
+op.sm2.key.parse.desc = Parse SM2 private key (hex/raw)
+op.sm2.verify.desc = Verify SM2 signature (SM2-with-SM3; default distid 1234567812345678)
+op.sm2.verify.arg.key = Public key (hex/raw)
+op.sm2.verify.arg.digest = Message digest to verify
+op.sm2.verify.arg.signature = Signature (r||s, hex)
+op.sm2.verify.arg.sig_format = Signature format: der/rss
+op.sm2.verify.arg.sig_type = Signature type: sm2/sm3 (distid-based)
+op.sm2.verify.arg.distid = Distinguishing ID (default 1234567812345678)
+op.sort.desc = Sort lines alphabetically (alpha, default); numeric / ip / length / raw byte order (bytes) via --type
 op.split.desc = Split input by delimiter (one segment per line)
 op.ssdeep.desc = ssdeep fuzzy hash (CTPH; textual signature like 3:FJKKIUKact:FHIGi; libfuzzy-compatible)
 op.ssdeep.compare.desc = Compare two ssdeep fuzzy signatures, returning a similarity score 0-100
 op.ssdeep.compare.arg.delimiter = Delimiter separating the two signatures
-op.ssh.parse.desc = Parse a public key: OpenSSH authorized_keys line, RFC 4716 SSH2 block or PKCS#8 SPKI (PEM/DER); outputs algorithm, bits, fields and SHA256 fingerprint where applicable. OpenSSH format, e.g. ssh-rsa/ssh-ed25519/ecdsa-sha2-*) and emit a JSON summary with algorithm, bits, key fields and SHA256 fingerprint
+op.ssh.parse.desc = Parse a public key from an OpenSSH authorized_keys line, RFC 4716 SSH2 block, or PKCS#8 SPKI (PEM/DER); output a JSON summary with algorithm, bit length, key fields and SHA256 fingerprint where applicable
 op.strip.ethernet.desc = Strip the Ethernet header and keep the payload
 op.strip.ipv4.desc = Strip the IPv4 header and keep the payload
 op.strip.ipv6.desc = Strip the IPv6 header and keep the payload
@@ -526,8 +592,10 @@ op.strip.udp.desc = Strip the UDP header and keep the payload
 op.swapcase.desc = Swap ASCII letter case (a-z <=> A-Z; other bytes unchanged)
 op.tail.desc = Take last N lines
 op.take.bytes.desc = Take first N bytes
-op.tea.decode.desc = TEA block cipher decode (64-bit blocks, zero padding)
-op.tea.encode.desc = TEA block cipher encode (64-bit blocks, zero padding)
+op.tea.encode.desc = [deprecated alias] Same as dpa:tea:encrypt
+op.tea.decode.desc = [deprecated alias] Same as dpa:tea:decrypt
+op.tea.encrypt.desc = TEA block cipher encrypt (64-bit blocks; padding: zero/pkcs7/none)
+op.tea.decrypt.desc = TEA block cipher decrypt (64-bit blocks; padding: zero/pkcs7/none)
 op.timestamp.desc = Current Unix timestamp (unit: s/ms/us/ns)
 op.timestamp.to.date.desc = UNIX timestamp (seconds) to UTC date string
 op.trim.desc = Trim leading/trailing whitespace bytes
@@ -537,9 +605,13 @@ op.url.decode.desc = URL percent-decode (UTF-8)
 op.url.encode.desc = URL percent-encode (RFC 3986, unreserved characters excluded)
 op.utf16.decode.desc = UTF-16 bytes to UTF-8 (LE/BE, BOM auto-detected)
 op.utf16.encode.desc = UTF-8 to UTF-16 bytes (LE/BE, optional BOM)
-op.utf8.escape.desc = Percent-escape non-printable bytes (%XX; '%%' for '%'), or every byte with encode_all
+op.utf8.escape.desc = Percent-escape non-printable bytes (%XX; '%' becomes '%25'), or every byte with encode_all; printable ASCII including space is kept by default, unlike url:encode
 op.utf8.unescape.desc = Decode percent-escapes (%XX) back to raw bytes
-op.uuid4.desc = Generate UUID (RFC 4122, versions 1/3/4/5)
+op.uuid.desc = Generate a UUID (RFC 4122; --version 1|3|4|5, default 4)
+op.uuid.arg.version = UUID version: 1 (time) / 3 (MD5 name) / 4 (random, default) / 5 (SHA-1 name)
+op.uuid.arg.namespace = Namespace UUID for v3/v5 (alias: dns / url / oid / x500)
+op.uuid.arg.name = Name for v3/v5
+op.uuid4.desc = [deprecated alias] Same as dpa:uuid; use dpa:uuid instead
 op.uuid4.arg.version = UUID version: 1 (time) / 3 (MD5 name) / 4 (random, default) / 5 (SHA-1 name)
 op.uuid4.arg.namespace = Namespace UUID for v3/v5 (alias: dns / url / oid / x500)
 op.uuid4.arg.name = Name for v3/v5
@@ -550,10 +622,14 @@ op.x509.arg.raw = Emit the raw DER certificate as hex instead of the parsed JSON
 op.xml.to-json.desc = XML document to JSON (attributes @name, text #text, repeated tags become arrays)
 op.xor.bruteforce.desc = XOR brute force (single/double-byte key, known-plaintext sample filter; top candidates by text score)
 op.xor.desc = XOR with key (cyclic)
-op.xtea.decode.desc = XTEA block cipher decode (64-bit blocks, zero padding)
-op.xtea.encode.desc = XTEA block cipher encode (64-bit blocks, zero padding)
-op.xxtea.decode.desc = XXTEA block cipher decode
-op.xxtea.encode.desc = XXTEA block cipher encode
+op.xtea.encode.desc = [deprecated alias] Same as dpa:xtea:encrypt
+op.xtea.decode.desc = [deprecated alias] Same as dpa:xtea:decrypt
+op.xtea.encrypt.desc = XTEA block cipher encrypt (64-bit blocks; padding: zero/pkcs7/none)
+op.xtea.decrypt.desc = XTEA block cipher decrypt (64-bit blocks; padding: zero/pkcs7/none)
+op.xxtea.encode.desc = [deprecated alias] Same as dpa:xxtea:encrypt
+op.xxtea.decode.desc = [deprecated alias] Same as dpa:xxtea:decrypt
+op.xxtea.encrypt.desc = XXTEA block cipher encrypt (padding: zero/pkcs7/none)
+op.xxtea.decrypt.desc = XXTEA block cipher decrypt (padding: zero/pkcs7/none)
 op.yaml.to-json.desc = YAML document to JSON (parses scalars/sequences/mappings)
 op.zlib.compress.desc = zlib compress
 op.zlib.decompress.desc = zlib decompress
@@ -629,6 +705,7 @@ op.crc.arg.refin = Custom CRC reflect input (true/false, default: false)
 op.crc.arg.refout = Custom CRC reflect output (true/false, default: false)
 op.crc.arg.xorout = Custom CRC final XOR in hex or decimal (default: 0)
 op.datetime.translate.arg.format = Target strftime format, e.g. %Y-%m-%d
+op.datetime.translate.arg.on_error = Error handling for invalid lines: fail (default, whole batch fails) / skip (drop invalid lines and append a summary)
 op.decimal.decode.arg.delimiter = Strip input delimiter: none/space/comma/semicolon/colon/newline/crlf (default: space; whitespace is always tolerated)
 op.decimal.decode.arg.ignore_non_alphabet = Ignore non-digit characters instead of failing (default: false)
 op.decimal.encode.arg.delimiter = Byte separator: none/space/comma/semicolon/colon/newline/crlf (default: space)
@@ -678,7 +755,7 @@ op.extract.ips.arg.remove_local = Exclude local/private IPv4 addresses: true/fal
 op.extract.ips.arg.display_total = Display total number of items found: true/false, default false
 op.extract.ips.arg.sort = Sort results alphabetically: true/false, default false
 op.extract.ips.arg.unique = Remove duplicate results: true/false, default false
-op.extract.hashes.arg.length = Hash length to extract: 0 (all) / 32 / 40 / 64 / 128, default 0
+op.extract.hashes.arg.length = Hash length to extract: 0 (all) / 32 / 40 / 56 / 64 / 96 / 128, default 0
 op.extract.hashes.arg.display_total = Display total number of items found: true/false, default false
 op.extract.hashes.arg.sort = Sort results alphabetically: true/false, default false
 op.extract.hashes.arg.unique = Remove duplicate results: true/false, default false
@@ -686,6 +763,8 @@ op.extract.domains.arg.display_total = Display total number of items found: true
 op.extract.domains.arg.sort = Sort results alphabetically: true/false, default false
 op.extract.domains.arg.unique = Remove duplicate results: true/false, default false
 op.extract.domains.arg.underscore = Include labels starting with an underscore (DMARC/DKIM records)
+op.extract.domains.arg.filter_ext_tlds = Filter pseudo-TLDs that are common file extensions (app.js, style.css): true/false, default true
+op.extract.domains.arg.extra_tld_blacklist = Extra comma-separated TLD blacklist (case-insensitive)
 op.extract.mac.arg.display_total = Display total number of items found: true/false, default false
 op.extract.mac.arg.sort = Sort results alphabetically: true/false, default false
 op.extract.mac.arg.unique = Remove duplicate results: true/false, default false
@@ -707,7 +786,6 @@ op.hex.decode.arg.ignore_non_alphabet = Drop every non-hex character instead of 
 op.hex.encode.arg.bytes_per_line = Bytes per line for wrapping; 0 disables wrapping, 8..=64 allowed (default: 0)
 op.hex.encode.arg.delimiter = Byte separator: none/space/comma/semicolon/colon/newline/crlf (default: none)
 op.hex.encode.arg.uppercase = Emit uppercase hex digits (default: false)
-op.hex.to.pem.arg.label = PEM type tag, e.g. PUBLIC KEY / CERTIFICATE, default PUBLIC KEY
 op.hexdump.decode.arg.delimiter = Input layout: space (default; hexdump -C rows with offset/ASCII), comma (comma-separated bytes, 0x optional) or none (bare hex stream)
 op.hexdump.encode.arg.bytes_per_line = Bytes per line, multiple of 8 in 8..=64 (default: 16)
 op.hkdf.arg.hash = Hash: sha1 / sha256 / sha512; default sha256
@@ -715,7 +793,7 @@ op.hkdf.arg.info = Context / info string (UTF-8); default empty
 op.hkdf.arg.key = Input keying material (IKM): '0x..' hex or UTF-8; omitted => op input is used
 op.hkdf.arg.length = Output keying material length in bytes; default 32
 op.hkdf.arg.salt = Salt: '0x..' hex or UTF-8; empty => HashLen zero bytes
-op.hmac.arg.algo = Digest algorithm: sha1 / sha256 / sha512, default sha256
+op.hmac.arg.algo = Digest algorithm: sha1 / sha256 / sha512 / sm3 / sha3-256 / sha3-512, default sha256
 op.hmac.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes
 op.html.decode.arg.mode = Entity scope: both (default), named (HTML entities only) or numeric (&#NN; &#xHH; only)
 op.html.encode.arg.encode_all = Also encode every non-ASCII character as a decimal numeric entity (default: false)
@@ -729,7 +807,7 @@ op.keccak.arg.variant = Output size: 224 / 256 / 384 / 512, default 256
 op.octal.decode.arg.delimiter = Strip input delimiter: none/space/comma/semicolon/colon/newline/crlf (default: none; whitespace is always tolerated)
 op.octal.decode.arg.ignore_non_alphabet = Ignore characters outside 0-7 instead of failing (default: false)
 op.octal.encode.arg.delimiter = Byte separator: none/space/comma/semicolon/colon/newline/crlf (default: none)
-op.pbkdf2.arg.hash = PRF hash: sha1 / sha256 / sha512; default sha256
+op.pbkdf2.arg.hash = PRF hash: sha1 / sha256 / sha512 / sm3 / sha3-256 / sha3-512; default sha256
 op.pbkdf2.arg.iterations = Iteration count; default 10000
 op.pbkdf2.arg.key = Passphrase / password (UTF-8); omitted => op input is used
 op.pbkdf2.arg.length = Derived key length in bytes; default 32
@@ -774,7 +852,7 @@ op.rot13.arg.rot_lower = Rotate lowercase letters, default true
 op.rot13.arg.rot_upper = Rotate uppercase letters, default true
 op.rot13.arg.rot_numeric = Rotate digits, default false
 op.rot47.arg.amount = Shift amount, default 47
-op.sort.arg.type = Sort type: alpha / ip / numeric / length, default alpha
+op.sort.arg.type = Sort type: alpha (default) / numeric / ip / length / bytes
 op.unique.arg.separator = Item separator for line/item uniqueness, default empty (byte-level)
 op.unique.arg.display_count = Prepend occurrence count to each unique item, default false
 op.take.bytes.arg.start = Byte offset to start taking from, default 0
@@ -796,11 +874,24 @@ op.sm4.encrypt.arg.iv = IV/counter: '0x..' parsed as hex, otherwise UTF-8 bytes;
 op.sm4.encrypt.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
 op.sm4.encrypt.arg.mode = Mode: ecb / cbc / cfb / ofb / ctr, default cbc
 op.sm4.encrypt.arg.padding = Padding for ecb/cbc only: pkcs7 / none, default pkcs7; ignored by stream modes
+op.sm4.encrypt.arg.aad = Additional authenticated data (GCM only)
+op.sm4.decrypt.arg.aad = Additional authenticated data (GCM only)
+op.sm4.decrypt.arg.tag = Authentication tag (GCM only)
+op.sm4.mac.desc = SM4 MAC (CBC-MAC; key required; optional IV). SECURITY: CBC-MAC over variable-length messages with pkcs7 padding is vulnerable to length-extension forgery; prefer dpa:sm4:cmac for new designs
+op.sm4.cmac.desc = SM4 CMAC (GM/T 0005-2012, RFC 4493 construction); key required
+op.sm4.cmac.arg.key = Key (16 bytes)
+op.sm4.mac.arg.key = Key (16 bytes)
+op.sm4.mac.arg.iv = IV (16 bytes, optional)
+op.sm4.mac.arg.padding = Padding mode: zero/pkcs7/none
+op.sm4.mac.help_note = SECURITY: CBC-MAC over variable-length messages (pkcs7 padding) is vulnerable to length-extension forgery. Prefer dpa:sm4:cmac for new designs.
 op.split.arg.delimiter = Delimiter string to split on
 op.tail.arg.n = Number of lines to keep
 op.take.bytes.arg.n = Number of bytes to keep
 op.tea.decode.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
+op.tea.arg.padding = Padding mode: zero (default) / pkcs7 / none
 op.tea.encode.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
+op.tea.encrypt.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
+op.tea.decrypt.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
 op.timestamp.arg.unit = s / ms / us / ns; default s
 op.url.decode.arg.use_plus = Decode '+' as a space (application/x-www-form-urlencoded; default: false)
 op.url.encode.arg.preserve_unreserved = Keep RFC 3986 unreserved characters -._~ unencoded (default: true)
@@ -826,8 +917,12 @@ op.xor.arg.scheme = Scheme: standard (cyclic key) / input-delimited (key and inp
 op.xor.arg.null_preserving = When true, leave 0x00 bytes and bytes equal to the current key byte unchanged, default false
 op.xtea.decode.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
 op.xtea.encode.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
+op.xtea.encrypt.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
+op.xtea.decrypt.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
 op.xxtea.decode.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
 op.xxtea.encode.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
+op.xxtea.encrypt.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
+op.xxtea.decrypt.arg.key = Key: '0x..' parsed as hex, otherwise UTF-8 bytes; must be 16 bytes
 op.zlib.compress.arg.level = Compression level 0-9 (default: 6)
 
 op.csv.to-json.arg.row-delimiter = Row delimiter: auto (default, CRLF or LF), lf, or crlf
@@ -871,10 +966,7 @@ op.rail_fence.arg.offset = Plaintext rotation offset before laying out (default 
 op.luhn.desc = Luhn (mod-10) checksum: compute check digit, append it, or verify a number
 op.luhn.arg.mode = Mode: check-digit (default) / append / verify
 
-# generate family (lorem ipsum / de Bruijn / prime / HOTP / TOTP)
-op.lorem.ipsum.desc = Generate Lorem Ipsum placeholder text
-op.lorem.ipsum.arg.length = Length (positive integer; max 100000 for paragraphs/sentences/words, 1000000 for bytes)
-op.lorem.ipsum.arg.unit = Length unit: paragraphs (default) / sentences / words / bytes
+# generate family (de Bruijn / prime / HOTP / TOTP)
 op.de.bruijn.desc = Generate a De Bruijn sequence over digits 0..k-1 (FKM Lyndon-word construction)
 op.de.bruijn.arg.size = Alphabet size k (2-9)
 op.de.bruijn.arg.order = Substring order n (>= 2; k^n <= 50000)

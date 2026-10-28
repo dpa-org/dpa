@@ -17,7 +17,12 @@ pub fn ops() -> Vec<Op> {
             "dpa:datetime:parse",
             "analyze",
             "op.datetime.parse.desc",
-            &[],
+            &[ArgSpec {
+                name: "on_error",
+                required: false,
+                description: "op.datetime.parse.arg.on_error",
+                format: crate::ops::ArgFormat::Utf8,
+            },],
             datetime_parse
         ),
         op!(
@@ -36,12 +41,20 @@ pub fn ops() -> Vec<Op> {
             "dpa:datetime:translate",
             "analyze",
             "op.datetime.translate.desc",
-            &[ArgSpec {
-                name: "format",
-                required: true,
-                description: "op.datetime.translate.arg.format",
-                format: crate::ops::ArgFormat::Utf8,
-            },],
+            &[
+                ArgSpec {
+                    name: "format",
+                    required: true,
+                    description: "op.datetime.translate.arg.format",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "on_error",
+                    required: false,
+                    description: "op.datetime.translate.arg.on_error",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+            ],
             datetime_translate
         ),
     ]
@@ -49,7 +62,8 @@ pub fn ops() -> Vec<Op> {
 
 /// Parse one line through the supported formats and normalize to UTC.
 /// Supported: RFC3339, RFC2822, "%Y-%m-%d %H:%M:%S [%z]", "%Y/%m/%d %H:%M:%S [%z]",
-/// naive "%Y-%m-%d[T ]%H:%M:%S", "%Y/%m/%d %H:%M:%S", "%Y-%m-%d", and Unix epoch seconds.
+/// naive "%Y-%m-%d[T ]%H:%M[:%S[.f]]", "%Y/%m/%d %H:%M[:%S[.f]]", "%Y-%m-%d",
+/// "%Y/%m/%d", and Unix epoch seconds.
 fn parse_to_utc(line: &str) -> Option<DateTime<Utc>> {
     let line = line.trim();
     if line.is_empty() {
@@ -67,26 +81,31 @@ fn parse_to_utc(line: &str) -> Option<DateTime<Utc>> {
             return Some(dt.with_timezone(&Utc));
         }
     }
-    // Naive formats (treated as UTC).
+    // Naive formats (treated as UTC). Fractional-seconds variants are tried
+    // first; chrono's %.f accepts both "05" and "05.123456".
     for fmt in [
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y/%m/%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S%.f",
+        "%Y/%m/%d %H:%M:%S%.f",
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M",
     ] {
         if let Ok(dt) = NaiveDateTime::parse_from_str(line, fmt) {
             return Some(Utc.from_utc_datetime(&dt));
         }
     }
-    if let Ok(d) = NaiveDate::parse_from_str(line, "%Y-%m-%d") {
-        if let Some(t) = d.and_hms_opt(0, 0, 0) {
+    for fmt in ["%Y-%m-%d", "%Y/%m/%d"] {
+        if let Ok(d) = NaiveDate::parse_from_str(line, fmt)
+            && let Some(t) = d.and_hms_opt(0, 0, 0)
+        {
             return Some(Utc.from_utc_datetime(&t));
         }
     }
     // Unix epoch seconds.
-    if let Ok(secs) = line.parse::<i64>() {
-        if let Some(dt) = Utc.timestamp_opt(secs, 0).single() {
-            return Some(dt);
-        }
+    if let Ok(secs) = line.parse::<i64>()
+        && let Some(dt) = Utc.timestamp_opt(secs, 0).single()
+    {
+        return Some(dt);
     }
     None
 }
@@ -96,15 +115,60 @@ fn parse_line(line: &str) -> anyhow::Result<DateTime<Utc>> {
         .ok_or_else(|| anyhow::anyhow!("{}", i18n::tf("err.datetime_parse_failed", &[line.trim()])))
 }
 
-fn datetime_parse(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+/// Multi-line datetime ops pin the failing line number so
+/// the user can fix the right record; the raw parse error alone left them
+/// guessing which input line was bad.
+fn line_err(no: usize, e: anyhow::Error) -> anyhow::Error {
+    let n = no.to_string();
+    let msg = e.to_string();
+    anyhow::anyhow!(
+        "{}",
+        i18n::tf("err.datetime_parse_line", &[n.as_str(), msg.as_str()])
+    )
+}
+
+/// Per-line error handling mode for datetime ops.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OnError {
+    /// Fail the whole op at the first invalid line (default; keeps semantics
+    /// deterministic and loud).
+    Strict,
+    /// Skip invalid lines and append a summary comment so the caller can see
+    /// how much data was dropped.
+    Skip,
+}
+
+fn parse_on_error(args: &HashMap<String, String>) -> anyhow::Result<OnError> {
+    match args.get("on_error").map(|s| s.as_str()).unwrap_or("strict") {
+        "strict" => Ok(OnError::Strict),
+        "skip" => Ok(OnError::Skip),
+        other => anyhow::bail!("{}", i18n::tf("err.datetime_on_error_invalid", &[other])),
+    }
+}
+
+fn datetime_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let mode = parse_on_error(args)?;
     let text = String::from_utf8_lossy(input);
     let mut out = String::new();
-    for (i, line) in text.lines().enumerate() {
-        let dt = parse_line(line)?;
-        if i > 0 {
-            out.push('\n');
+    let mut skipped = 0usize;
+    for (idx, line) in text.lines().enumerate() {
+        match parse_line(line) {
+            Ok(dt) => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                out.push_str(&dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+            }
+            Err(e) => {
+                if mode == OnError::Strict {
+                    return Err(line_err(idx + 1, e));
+                }
+                skipped += 1;
+            }
         }
-        out.push_str(&dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    }
+    if skipped > 0 {
+        out.push_str(&format!("\n# [dpa] skipped {} invalid line(s)", skipped));
     }
     Ok(out.into_bytes())
 }
@@ -134,6 +198,9 @@ fn parse_delta_seconds(s: &str) -> anyhow::Result<i64> {
         let v: f64 = num
             .parse()
             .map_err(|_| anyhow::anyhow!("{}", i18n::tf("err.datetime_delta_bad", &[s])))?;
+        if !v.is_finite() {
+            anyhow::bail!("{}", i18n::t("err.datetime_delta_overflow"));
+        }
         let mult = match unit.to_ascii_lowercase().as_str() {
             "d" | "day" | "days" => 86400.0,
             "h" | "hr" | "hrs" | "hour" | "hours" => 3600.0,
@@ -141,7 +208,16 @@ fn parse_delta_seconds(s: &str) -> anyhow::Result<i64> {
             "s" | "sec" | "secs" | "second" | "seconds" => 1.0,
             _ => anyhow::bail!("{}", i18n::tf("err.datetime_delta_bad", &[s])),
         };
-        total += (v * mult).round() as i64;
+        // Reject magnitudes that cannot fit i64 (f64 as i64 would
+        // saturate, silently corrupting the result), then accumulate with
+        // checked_add so multi-token sums cannot wrap around.
+        let contrib = (v * mult).round();
+        if !contrib.is_finite() || contrib.abs() > 9.0e18 {
+            anyhow::bail!("{}", i18n::t("err.datetime_delta_overflow"));
+        }
+        total = total
+            .checked_add(contrib as i64)
+            .ok_or_else(|| anyhow::anyhow!("{}", i18n::t("err.datetime_delta_overflow")))?;
         any = true;
     }
     if !any {
@@ -161,7 +237,15 @@ fn datetime_delta(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resul
     if op == "delta" {
         // Input: one datetime + one delta ("1d 2h"), output the shifted time.
         let secs = parse_delta_seconds(lines[1])?;
-        let dt = a + chrono::Duration::seconds(secs);
+        // chrono TimeDelta::seconds panics beyond ~9.2e9 seconds and
+        // `+` on DateTime panics on overflow; validate before constructing
+        // and use the checked arithmetic path.
+        if secs.abs() > 9_000_000_000 {
+            anyhow::bail!("{}", i18n::t("err.datetime_delta_overflow"));
+        }
+        let dt = a
+            .checked_add_signed(chrono::Duration::seconds(secs))
+            .ok_or_else(|| anyhow::anyhow!("{}", i18n::t("err.datetime_delta_overflow")))?;
         return Ok(dt
             .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
             .into_bytes());
@@ -176,31 +260,77 @@ fn datetime_delta(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resul
     let seconds = abs % 60;
     let human = if days > 0 {
         format!(
-            "{} days {} hours {} minutes {} seconds",
-            days, hours, minutes, seconds
+            "{} {} {} {} {} {} {} {}",
+            days,
+            if days == 1 { "day" } else { "days" },
+            hours,
+            if hours == 1 { "hour" } else { "hours" },
+            minutes,
+            if minutes == 1 { "minute" } else { "minutes" },
+            seconds,
+            if seconds == 1 { "second" } else { "seconds" },
         )
     } else if hours > 0 {
-        format!("{} hours {} minutes {} seconds", hours, minutes, seconds)
+        format!(
+            "{} {} {} {} {} {}",
+            hours,
+            if hours == 1 { "hour" } else { "hours" },
+            minutes,
+            if minutes == 1 { "minute" } else { "minutes" },
+            seconds,
+            if seconds == 1 { "second" } else { "seconds" },
+        )
     } else if minutes > 0 {
-        format!("{} minutes {} seconds", minutes, seconds)
+        format!(
+            "{} {} {} {}",
+            minutes,
+            if minutes == 1 { "minute" } else { "minutes" },
+            seconds,
+            if seconds == 1 { "second" } else { "seconds" },
+        )
     } else {
-        format!("{} seconds", seconds)
+        format!(
+            "{} {}",
+            seconds,
+            if seconds == 1 { "second" } else { "seconds" }
+        )
     };
-    Ok(format!("{}{} seconds ({})", sign, abs, human).into_bytes())
+    let total_unit = if abs == 1 { "second" } else { "seconds" };
+    Ok(format!("{}{} {} ({})", sign, abs, total_unit, human).into_bytes())
 }
 
 fn datetime_translate(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     let fmt = args
         .get("format")
         .ok_or_else(|| anyhow::anyhow!("{}", i18n::t("err.missing_format")))?;
+    let mode = parse_on_error(args)?;
     let text = String::from_utf8_lossy(input);
     let mut out = String::new();
-    for (i, line) in text.lines().enumerate() {
-        let dt = parse_line(line)?;
-        if i > 0 {
-            out.push('\n');
+    let mut skipped = 0usize;
+    for (idx, line) in text.lines().enumerate() {
+        match parse_line(line) {
+            Ok(dt) => {
+                if !out.is_empty() {
+                    out.push('\n');
+                }
+                // chrono's DelayedFormat can fail on an invalid strftime
+                // directive; `to_string()` would panic. Route the error through
+                // std::fmt::Write and map it to a diagnostic error instead.
+                let mut piece = String::new();
+                std::fmt::write(&mut piece, format_args!("{}", dt.format(fmt)))
+                    .map_err(|_| anyhow::anyhow!("{}", i18n::tf("err.datetime_format", &[fmt])))?;
+                out.push_str(&piece);
+            }
+            Err(e) => {
+                if mode == OnError::Strict {
+                    return Err(line_err(idx + 1, e));
+                }
+                skipped += 1;
+            }
         }
-        out.push_str(&dt.format(fmt).to_string());
+    }
+    if skipped > 0 {
+        out.push_str(&format!("\n# [dpa] skipped {} invalid line(s)", skipped));
     }
     Ok(out.into_bytes())
 }
@@ -208,6 +338,37 @@ fn datetime_translate(input: &[u8], args: &HashMap<String, String>) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_strict_error_pins_line_number() {
+        // Strict mode must name the failing line instead of
+        // returning the bare parse error.
+        let e = datetime_parse(b"2024-01-02\nnot-a-date\n2024-01-03", &HashMap::new())
+            .expect_err("invalid second line must fail");
+        let msg = e.to_string();
+        assert!(
+            msg.contains("line 2") || msg.contains("第 2 行"),
+            "line number missing: {msg}"
+        );
+    }
+
+    #[test]
+    fn delta_human_uses_singular_forms() {
+        // The human delta text must agree in number with the
+        // value ("1 hour / 1 minute / 1 second", never "1 hours").
+        let out = datetime_delta(
+            b"2024-01-02T00:00:00Z\n2024-01-02T01:01:01Z",
+            &HashMap::new(),
+        )
+        .unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("1 hour"), "got: {s}");
+        assert!(s.contains("1 minute"), "got: {s}");
+        assert!(s.contains("1 second"), "got: {s}");
+        assert!(!s.contains(" 1 hours"), "got: {s}");
+        assert!(!s.contains(" 1 minutes"), "got: {s}");
+        assert!(!s.contains(" 1 seconds"), "got: {s}");
+    }
 
     #[test]
     fn parse_normalizes_common_formats() {
@@ -256,15 +417,73 @@ mod tests {
     }
 
     #[test]
+    fn parse_supports_minute_and_fractional_precision() {
+        // Minute precision, both separators (the YYYY/MM/DD case from user feedback).
+        assert_eq!(
+            datetime_parse(b"2026/10/02 14:05", &HashMap::new()).unwrap(),
+            b"2026-10-02T14:05:00Z"
+        );
+        assert_eq!(
+            datetime_parse(b"2024-01-02 03:04", &HashMap::new()).unwrap(),
+            b"2024-01-02T03:04:00Z"
+        );
+        // Fractional seconds.
+        assert_eq!(
+            datetime_parse(b"2024-01-02 03:04:05.123", &HashMap::new()).unwrap(),
+            b"2024-01-02T03:04:05Z"
+        );
+        assert_eq!(
+            datetime_parse(b"2024/01/02 03:04:05.123456", &HashMap::new()).unwrap(),
+            b"2024-01-02T03:04:05Z"
+        );
+        // Date-only with slash separator.
+        assert_eq!(
+            datetime_parse(b"2024/01/02", &HashMap::new()).unwrap(),
+            b"2024-01-02T00:00:00Z"
+        );
+    }
+
+    #[test]
+    fn parse_skip_mode_drops_bad_lines_with_summary() {
+        // Strict (default) fails on the first bad line.
+        assert!(datetime_parse(b"2024-01-01\nbad\n2024-01-02", &HashMap::new()).is_err());
+        // Skip mode keeps good lines and appends a summary comment.
+        let args = HashMap::from([("on_error".to_string(), "skip".to_string())]);
+        assert_eq!(
+            datetime_parse(b"2024-01-01\nbad\n2024-01-02\n", &args).unwrap(),
+            b"2024-01-01T00:00:00Z\n2024-01-02T00:00:00Z\n# [dpa] skipped 1 invalid line(s)"
+        );
+        // All lines bad still yields the summary.
+        assert_eq!(
+            datetime_parse(b"bad\nworse", &args).unwrap(),
+            b"\n# [dpa] skipped 2 invalid line(s)"
+        );
+        // Invalid on_error value is rejected.
+        let bad = HashMap::from([("on_error".to_string(), "frobnicate".to_string())]);
+        assert!(datetime_parse(b"2024-01-01", &bad).is_err());
+    }
+
+    #[test]
+    fn translate_skip_mode_mirrors_parse() {
+        let mut args = HashMap::from([("format".to_string(), "%Y".to_string())]);
+        assert!(datetime_translate(b"2024-01-01\nbad", &args).is_err());
+        args.insert("on_error".to_string(), "skip".to_string());
+        assert_eq!(
+            datetime_translate(b"2024-01-01\nbad\n2025-01-01", &args).unwrap(),
+            b"2024\n2025\n# [dpa] skipped 1 invalid line(s)"
+        );
+    }
+
+    #[test]
     fn delta_days_and_sign() {
         assert_eq!(
             datetime_delta(b"2024-01-01\n2024-01-02", &HashMap::new()).unwrap(),
-            b"86400 seconds (1 days 0 hours 0 minutes 0 seconds)"
+            b"86400 seconds (1 day 0 hours 0 minutes 0 seconds)"
         );
         // Negative delta keeps the sign.
         assert_eq!(
             datetime_delta(b"2024-01-02\n2024-01-01", &HashMap::new()).unwrap(),
-            b"-86400 seconds (1 days 0 hours 0 minutes 0 seconds)"
+            b"-86400 seconds (1 day 0 hours 0 minutes 0 seconds)"
         );
         // Sub-minute delta.
         assert_eq!(
@@ -323,7 +542,7 @@ mod tests {
         )
         .unwrap();
         assert!(out.starts_with("-86400 seconds"), "{out}");
-        assert!(out.contains("1 days"), "{out}");
+        assert!(out.contains("1 day"), "{out}");
         // Default (no operation) is diff.
         let out2 = String::from_utf8(
             datetime_delta(
@@ -334,5 +553,44 @@ mod tests {
         )
         .unwrap();
         assert!(out2.starts_with("3723 seconds"), "{out2}");
+    }
+
+    /// An invalid strftime directive must produce an error, never a panic.
+    #[test]
+    fn translate_invalid_format_returns_error_not_panic() {
+        let args = HashMap::from([("format".to_string(), "%Q".to_string())]);
+        let err = datetime_translate(b"2024-01-01", &args).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("format"), "{msg}");
+        // Valid formats still translate fine.
+        let args = HashMap::from([("format".to_string(), "%Y".to_string())]);
+        assert_eq!(datetime_translate(b"2024-01-01", &args).unwrap(), b"2024");
+    }
+
+    /// Oversized deltas must error instead of saturating/wrapping;
+    /// multi-token sums must never wrap around silently.
+    #[test]
+    fn delta_overflow_returns_error() {
+        let args = HashMap::from([("operation".to_string(), "delta".to_string())]);
+        let err =
+            datetime_delta(b"2024-01-01T00:00:00Z\n999999999999999999999999s", &args).unwrap_err();
+        assert!(err.to_string().contains("range"), "{err}");
+    }
+
+    /// Two large-but-individually-parseable tokens must not wrap the sum.
+    #[test]
+    fn delta_multi_token_no_wraparound() {
+        let args = HashMap::from([("operation".to_string(), "delta".to_string())]);
+        let err = datetime_delta(
+            b"2024-01-01T00:00:00Z\n999999999999999999s 999999999999999999s",
+            &args,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("range"), "{err}");
+        // A legitimate delta at the boundary still works.
+        assert_eq!(
+            datetime_delta(b"2024-01-01T00:00:00Z\n1d 2h 3m 4s", &args).unwrap(),
+            b"2024-01-02T02:03:04Z"
+        );
     }
 }

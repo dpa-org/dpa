@@ -4,7 +4,7 @@
 #   .\scripts\release.ps1 -Version 1.0.0 # override version (default: read Cargo.toml)
 #
 # Produces:
-#   dist\dpa-<ver>-x86_64-pc-windows-msvc\dpa.exe        (install-time name; copied from dpa-cli.exe)
+#   dist\dpa-<ver>-x86_64-pc-windows-msvc\dpa.exe
 #   dist\dpa-<ver>-x86_64-pc-windows-msvc.zip
 #   dist\dpa-<ver>-x86_64-pc-windows-msvc.zip.sha256
 #
@@ -29,29 +29,51 @@ if (-not $Version) { throw "Cannot resolve version from Cargo.toml; pass -Versio
 $ver = $Version.TrimStart("v")
 
 # --- sanity checks ---------------------------------------------------------
+# Refuse to package a binary whose embedded git hash does
+# not match a real commit. A dirty tree used to only warn, silently shipping
+# binaries whose `--version` pointed at an older commit.
 $dirty = git status --porcelain
 if ($dirty) {
-  Write-Host "WARN: working tree is not clean; packaging anyway:" -ForegroundColor Yellow
-  $dirty | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+  Write-Host "ERROR: working tree is not clean; refusing to package:" -ForegroundColor Red
+  $dirty | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+  throw "Refusing to package from a dirty working tree; commit or stash changes first."
 }
 
 # --- build release ---------------------------------------------------------
+# cargo's rerun-if-changed does not reliably track files under
+# .git/, so an incremental build after a commit can keep the previous commit
+# hash embedded (a stale `dpa --version`). Touching build.rs forces cargo to
+# rerun build.rs, which re-reads HEAD. The post-commit hook
+# (scripts/setup-git-hooks.ps1) covers ad-hoc builds; this touch guarantees
+# packaging builds are always fresh even if the hook is not installed.
+Write-Host "Touching build.rs to force a fresh embedded commit hash..." -ForegroundColor Cyan
+(Get-Item "build.rs").LastWriteTime = Get-Date
+
 Write-Host "Building release (features: cli)..." -ForegroundColor Cyan
 cargo build --release --features cli
 if ($LASTEXITCODE -ne 0) { throw "cargo build --release failed" }
+
+# Hard-fail the packaging build if the embedded commit hash in
+# `dpa --version` does not match HEAD. Before this, a packaging build could
+# succeed while advertising an older commit (e.g. if the post-commit hook was
+# missing, or an incremental build skipped rerunning build.rs). The smoke gate
+# asserts --version == HEAD on the freshly built binary; a mismatch aborts the
+# packaging instead of silently shipping stale version metadata.
+$binSrc = Join-Path (Get-Location) "target\release\dpa.exe"
+if (-not (Test-Path $binSrc)) { throw "release binary not found: $binSrc" }
+Write-Host "Running release smoke gate (--version must equal HEAD)..." -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot "release_smoke.ps1") -Exe $binSrc
 
 # --- assemble dist dir -----------------------------------------------------
 $triple = "x86_64-pc-windows-msvc"
 $dirName = "dpa-$ver-$triple"
 $distRoot = Join-Path (Get-Location) "dist"
 $distDir = Join-Path $distRoot $dirName
-$binSrc = Join-Path (Get-Location) "target\release\dpa-cli.exe"
-if (-not (Test-Path $binSrc)) { throw "release binary not found: $binSrc" }
 
 if (Test-Path $distDir) { Remove-Item $distDir -Recurse -Force }
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 
-# install-time name: dpa.exe (users type `dpa`; the Cargo bin is dpa-cli)
+# dist keeps the binary under its canonical name: dpa.exe
 Copy-Item $binSrc (Join-Path $distDir "dpa.exe")
 Copy-Item "LICENSE" (Join-Path $distDir "LICENSE")
 if (Test-Path "NOTICE") { Copy-Item "NOTICE" (Join-Path $distDir "NOTICE") }

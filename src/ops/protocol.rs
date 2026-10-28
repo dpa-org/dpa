@@ -157,7 +157,10 @@ fn decode_packet_input(input: &[u8], args: &HashMap<String, String>) -> anyhow::
         "auto" => {
             let owned = String::from_utf8_lossy(input);
             let s = owned.trim();
-            if s.len() % 2 == 0 && !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit()) {
+            if s.len().is_multiple_of(2)
+                && !s.is_empty()
+                && s.chars().all(|c| c.is_ascii_hexdigit())
+            {
                 hex::decode(s).map_err(|_| anyhow::anyhow!("{}", i18n::t("err.proto_bad_hex")))
             } else {
                 Ok(input.to_vec())
@@ -181,7 +184,12 @@ fn ipv4_str(b: &[u8]) -> String {
 
 fn ipv6_str(b: &[u8]) -> String {
     // RFC 5952-ish: lowercase, compress the longest run of zero groups (>= 2).
-    let groups: Vec<u16> = b.chunks_exact(2).map(be16).collect();
+    let groups: Vec<u16> = b
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|chunk| be16(chunk))
+        .collect();
     let mut best_start = None;
     let mut best_len = 0usize;
     let mut i = 0usize;
@@ -413,16 +421,143 @@ fn parse_tls(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Ve
         if off + len > input.len() {
             anyhow::bail!("{}", i18n::t("err.proto_bad_tls"));
         }
-        records.push(json!({
+        let payload = &input[off..off + len];
+        let mut rec = json!({
             "content_type": tls_content_type(ct),
             "content_type_code": ct,
             "version": format!("0x{:04x}", version),
             "record_length": len,
-        }));
+        });
+        // Drill into the first handshake message of a TLS handshake record so
+        // a ClientHello exposes the SNI server_name instead of just a record
+        // envelope. Parsing is defensive: a malformed inner
+        // layout leaves the record as-is rather than failing the whole parse.
+        if ct == 22
+            && !payload.is_empty()
+            && let Some(hs) = parse_handshake(payload)
+        {
+            rec["handshake"] = serde_json::Value::Object(hs);
+        }
+        records.push(rec);
         off += len;
     }
     let out = json!({ "records": records, "record_count": records.len() });
     Ok(serde_json::to_vec(&out)?)
+}
+
+/// Best-effort TLS handshake parse (analysis-only). Returns `None` for
+/// truncated or non-ClientHello bodies so the record list still renders.
+fn parse_handshake(payload: &[u8]) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if payload.len() < 4 {
+        return None;
+    }
+    let htype = payload[0];
+    let hlen = ((payload[1] as usize) << 16) | ((payload[2] as usize) << 8) | payload[3] as usize;
+    let body = payload.get(4..4 + hlen.min(payload.len().saturating_sub(4)))?;
+    let mut out = serde_json::Map::new();
+    out.insert("type".to_string(), json!(handshake_type(htype)));
+    out.insert("type_code".to_string(), json!(htype));
+    out.insert("message_length".to_string(), json!(hlen));
+
+    if htype == 1 && body.len() >= 34 {
+        // ClientHello: version(2) random(32) session_id(1+len)
+        // cipher_suites(2+len) compression(1+len) extensions(2+len)
+        out.insert(
+            "client_version".to_string(),
+            json!(format!("0x{:04x}", be16(&body[0..2]))),
+        );
+        let mut p = 34usize;
+        if p >= body.len() {
+            return Some(out);
+        }
+        let sid_len = body[p] as usize;
+        p += 1;
+        if p + sid_len > body.len() {
+            return Some(out);
+        }
+        p += sid_len;
+        if p + 2 > body.len() {
+            return Some(out);
+        }
+        let cs_len = be16(&body[p..p + 2]) as usize;
+        p += 2;
+        if p + cs_len > body.len() {
+            return Some(out);
+        }
+        out.insert("cipher_suites_count".to_string(), json!(cs_len / 2));
+        p += cs_len;
+        if p >= body.len() {
+            return Some(out);
+        }
+        let cm_len = body[p] as usize;
+        p += 1;
+        if p + cm_len > body.len() {
+            return Some(out);
+        }
+        out.insert("compression_methods_count".to_string(), json!(cm_len));
+        p += cm_len;
+        if p + 2 > body.len() {
+            return Some(out);
+        }
+        let ext_total = be16(&body[p..p + 2]) as usize;
+        p += 2;
+        if p + ext_total <= body.len() {
+            let ext_end = p + ext_total;
+            let mut ext_count = 0u32;
+            while p + 4 <= ext_end {
+                let etype = be16(&body[p..p + 2]);
+                let elen = be16(&body[p + 2..p + 4]) as usize;
+                p += 4;
+                if p + elen > ext_end {
+                    break;
+                }
+                ext_count += 1;
+                if etype == 0 {
+                    // server_name: list_len(2) then { name_type(1) name_len(2) name }
+                    let data = &body[p..p + elen];
+                    if data.len() >= 3 {
+                        let list_len = be16(&data[0..2]) as usize;
+                        let mut lp = 2usize;
+                        let mut name = None;
+                        while lp + 3 <= data.len() && lp + 3 <= 2 + list_len {
+                            let ntype = data[lp];
+                            let nlen = be16(&data[lp + 1..lp + 3]) as usize;
+                            lp += 3;
+                            if lp + nlen > data.len() {
+                                break;
+                            }
+                            if ntype == 0 && name.is_none() {
+                                name = Some(
+                                    String::from_utf8_lossy(&data[lp..lp + nlen]).into_owned(),
+                                );
+                            }
+                            lp += nlen;
+                        }
+                        if let Some(n) = name {
+                            out.insert("server_name".to_string(), json!(n));
+                        }
+                    }
+                }
+                p += elen;
+            }
+            out.insert("extensions_count".to_string(), json!(ext_count));
+        }
+    }
+    Some(out)
+}
+
+fn handshake_type(t: u8) -> &'static str {
+    match t {
+        1 => "ClientHello",
+        2 => "ServerHello",
+        4 => "NewSessionTicket",
+        11 => "Certificate",
+        12 => "ServerKeyExchange",
+        14 => "ServerHelloDone",
+        16 => "ClientKeyExchange",
+        20 => "Finished",
+        _ => "Unknown",
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -483,6 +618,58 @@ fn strip_udp(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tls_parse_extracts_sni() {
+        // A TLS ClientHello must surface the SNI server_name
+        // instead of a bare record envelope.
+        let name = b"example.com";
+        let mut ext_data = Vec::new();
+        ext_data.extend_from_slice(&((1 + 2 + name.len()) as u16).to_be_bytes());
+        ext_data.push(0x00);
+        ext_data.extend_from_slice(&(name.len() as u16).to_be_bytes());
+        ext_data.extend_from_slice(name);
+        let mut ext = Vec::new();
+        ext.extend_from_slice(&0u16.to_be_bytes()); // server_name (0)
+        ext.extend_from_slice(&(ext_data.len() as u16).to_be_bytes());
+        ext.extend_from_slice(&ext_data);
+
+        let mut body = Vec::new();
+        body.extend_from_slice(&0x0303u16.to_be_bytes()); // client_version
+        body.extend_from_slice(&[0xab; 32]); // random
+        body.push(0x00); // session id length
+        body.extend_from_slice(&2u16.to_be_bytes()); // cipher suites length
+        body.extend_from_slice(&[0x00, 0x2f]); // TLS_RSA_WITH_AES_128_CBC_SHA
+        body.push(0x00); // compression methods length
+        body.extend_from_slice(&(ext.len() as u16).to_be_bytes());
+        body.extend_from_slice(&ext);
+
+        let mut rec = Vec::new();
+        rec.push(0x16); // handshake
+        rec.push(0x03);
+        rec.push(0x01);
+        rec.extend_from_slice(&((4 + body.len()) as u16).to_be_bytes());
+        rec.push(0x01); // ClientHello
+        rec.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+        rec.extend_from_slice(&body);
+
+        let j: serde_json::Value =
+            serde_json::from_slice(&parse_tls(&rec, &HashMap::new()).unwrap()).unwrap();
+        assert_eq!(j["record_count"], 1);
+        assert_eq!(j["records"][0]["handshake"]["type"], "ClientHello");
+        assert_eq!(j["records"][0]["handshake"]["cipher_suites_count"], 1);
+        assert_eq!(j["records"][0]["handshake"]["extensions_count"], 1);
+        assert_eq!(j["records"][0]["handshake"]["server_name"], "example.com");
+        // Malformed inner layout must not fail the whole record list; the
+        // record shell survives but carries no valid SNI.
+        let mut bad = rec;
+        bad[5] = 0xff; // corrupt handshake message type byte
+        let j: serde_json::Value =
+            serde_json::from_slice(&parse_tls(&bad, &HashMap::new()).unwrap()).unwrap();
+        assert_eq!(j["record_count"], 1);
+        assert_ne!(j["records"][0]["handshake"]["type"], "ClientHello");
+        assert!(j["records"][0]["handshake"]["server_name"].is_null());
+    }
 
     #[test]
     fn ethernet_parse_and_strip() {

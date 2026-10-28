@@ -1,0 +1,4 @@
+# Basic rustfmt configuration for consistent formatting across the workspace.
+edition = "2024"
+max_width = 100
+use_small_heuristics = "Default"

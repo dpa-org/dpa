@@ -1,4 +1,4 @@
-//! dpa — Data Processing & Analysis, flows as code.
+//! dpa - Data Processing & Analysis, flows as code.
 //!
 //! Library entry: the CLI binary and the Python binding (feature = "python")
 //! share the same engine. CLI and plugin host are excluded on wasm32 targets
@@ -7,6 +7,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cli;
 pub mod engine;
+pub mod estimate;
 pub mod flow;
 pub mod i18n;
 #[cfg(not(target_arch = "wasm32"))]
@@ -15,7 +16,10 @@ pub mod ops;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 pub mod recipe;
-pub mod recipe_map;
+// The recipe map tables are an internal translation surface
+// (zh<->en op names) with no public items; keep them crate-private so the
+// module cannot grow an accidental public API.
+pub(crate) mod recipe_map;
 pub mod registry;
 
 #[cfg(feature = "python")]

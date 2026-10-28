@@ -1,5 +1,5 @@
 //! Public-key analysis ops (analysis-only domain: format bridge + certificate
-//! parsing). Deliberately NO encryption/signing/decryption — standard public-key
+//! parsing). Deliberately NO encryption/signing/decryption - standard public-key
 //! crypto operations belong to openssl/gmssl, not to a data-processing tool.
 //!
 //! - `dpa:pem`  : PEM envelope encode/decode (PEM <-> raw DER bytes).
@@ -9,11 +9,8 @@ use std::collections::HashMap;
 
 use pem::Pem;
 
+use super::crypto::opt_arg;
 use super::{ArgSpec, Op, parse_bool};
-
-fn opt_arg<'a>(args: &'a HashMap<String, String>, name: &str, default: &'a str) -> &'a str {
-    args.get(name).map(String::as_str).unwrap_or(default)
-}
 
 pub fn ops() -> Vec<Op> {
     vec![
@@ -45,7 +42,7 @@ pub fn ops() -> Vec<Op> {
                 name: "raw",
                 required: false,
                 description: "op.x509.arg.raw",
-                format: crate::ops::ArgFormat::Utf8,
+                format: crate::ops::ArgFormat::Bool,
             },],
             x509_parse
         ),
@@ -168,25 +165,6 @@ pub fn ops() -> Vec<Op> {
             pubkey_extract
         ),
         op!(
-            "dpa:pem:to:hex",
-            "codec",
-            "op.pem.to.hex.desc",
-            &[],
-            pem_to_hex
-        ),
-        op!(
-            "dpa:hex:to:pem",
-            "codec",
-            "op.hex.to.pem.desc",
-            &[ArgSpec {
-                name: "label",
-                required: false,
-                description: "op.hex.to.pem.arg.label",
-                format: crate::ops::ArgFormat::Utf8,
-            },],
-            hex_to_pem
-        ),
-        op!(
             "dpa:ssh:parse",
             "analyze",
             "op.ssh.parse.desc",
@@ -205,10 +183,80 @@ pub fn ops() -> Vec<Op> {
             &[],
             asn1_parse
         ),
+        op!(
+            "dpa:sm2:parse",
+            "analyze",
+            "op.sm2.parse.desc",
+            &[ArgSpec {
+                name: "raw",
+                required: false,
+                description: "op.sm2.parse.arg.raw",
+                format: crate::ops::ArgFormat::Bool,
+            },],
+            sm2_parse
+        ),
+        op!(
+            "dpa:sm2:pubkey:extract",
+            "codec",
+            "op.sm2.pubkey.extract.desc",
+            &[],
+            sm2_pubkey_extract
+        ),
+        op!(
+            "dpa:sm2:key:parse",
+            "analyze",
+            "op.sm2.key.parse.desc",
+            &[],
+            sm2_key_parse
+        ),
+        op!(
+            "dpa:sm2:verify",
+            "crypto",
+            "op.sm2.verify.desc",
+            &[
+                ArgSpec {
+                    name: "key",
+                    required: true,
+                    description: "op.sm2.verify.arg.key",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "digest",
+                    required: false,
+                    description: "op.sm2.verify.arg.digest",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "signature",
+                    required: true,
+                    description: "op.sm2.verify.arg.signature",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "sig_format",
+                    required: false,
+                    description: "op.sm2.verify.arg.sig_format",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "sig_type",
+                    required: false,
+                    description: "op.sm2.verify.arg.sig_type",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+                ArgSpec {
+                    name: "distid",
+                    required: false,
+                    description: "op.sm2.verify.arg.distid",
+                    format: crate::ops::ArgFormat::Utf8,
+                },
+            ],
+            sm2_verify
+        ),
     ]
 }
 
-/// `dpa:pem` — strip or add a PEM envelope. decode reads the first PEM block and
+/// `dpa:pem` - strip or add a PEM envelope. decode reads the first PEM block and
 /// returns its raw DER contents; encode wraps input bytes in a PEM block with the
 /// requested type tag.
 fn pem_conv(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
@@ -216,10 +264,7 @@ fn pem_conv(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<
     match action {
         "decode" => {
             let parsed = pem::parse(input).map_err(|e| {
-                anyhow::anyhow!(
-                    "PEM decode failed: {e}; input sample: {:?}",
-                    &input[..input.len().min(120)]
-                )
+                anyhow::anyhow!("PEM decode failed: {e} (input length {})", input.len())
             })?;
             Ok(parsed.contents().to_vec())
         }
@@ -235,7 +280,7 @@ fn pem_conv(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<
     }
 }
 
-/// `dpa:x509` — parse a certificate (PEM or DER) and emit a JSON summary of the
+/// `dpa:x509` - parse a certificate (PEM or DER) and emit a JSON summary of the
 /// fields a data analyst most often needs. Output is a pretty-printed JSON text.
 fn x509_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     use x509_parser::parse_x509_certificate;
@@ -249,10 +294,10 @@ fn x509_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Ve
 
     // Raw mode: emit the certificate DER as hex instead of the parsed JSON
     // summary (align CyberChef Parse X.509 Certificate "Raw" output).
-    if let Some(v) = args.get("raw") {
-        if parse_bool(v)? {
-            return Ok(hex::encode(&der).into_bytes());
-        }
+    if let Some(v) = args.get("raw")
+        && parse_bool(v)?
+    {
+        return Ok(hex::encode(&der).into_bytes());
     }
 
     let (_, cert) = parse_x509_certificate(&der)
@@ -260,6 +305,47 @@ fn x509_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Ve
 
     let pki = &cert.subject_pki;
     let alg_oid = pki.algorithm.algorithm.to_string();
+    // Real certificate signature algorithm (e.g. SM2-with-SM3 for SM2 certs).
+    let sig_oid = cert.signature_algorithm.oid().to_string();
+
+    // Enrich the subject public key with curve details when the SPKI carries
+    // an EC/SM2 key. SM2 point validity is checked by the same sm2.rs path
+    // used by `dpa:sm2:verify` (RustCrypto sm2 0.14, default GM/T distid).
+    let spk_oid = spki_algorithm_oid(pki);
+    let mut spk_json = serde_json::json!({
+        "algorithm_oid": alg_oid,
+        "der_hex": hex::encode(pki.subject_public_key.clone()),
+    });
+    match spk_oid.as_str() {
+        OID_EC_P256 => {
+            spk_json["curve_oid"] = serde_json::Value::String(OID_EC_P256.to_string());
+            spk_json["curve"] = serde_json::Value::String("nistp256".to_string());
+            spk_json["bits"] = serde_json::Value::from(256);
+        }
+        OID_EC_P384 => {
+            spk_json["curve_oid"] = serde_json::Value::String(OID_EC_P384.to_string());
+            spk_json["curve"] = serde_json::Value::String("nistp384".to_string());
+            spk_json["bits"] = serde_json::Value::from(384);
+        }
+        OID_EC_SECP256K1 => {
+            spk_json["curve_oid"] = serde_json::Value::String(OID_EC_SECP256K1.to_string());
+            spk_json["curve"] = serde_json::Value::String("secp256k1".to_string());
+            spk_json["bits"] = serde_json::Value::from(256);
+        }
+        OID_EC_SM2 => {
+            use sm2::dsa::VerifyingKey;
+            let point_valid = VerifyingKey::from_sec1_bytes(
+                SM2_DEFAULT_DISTID,
+                pki.subject_public_key.data.as_ref(),
+            )
+            .is_ok();
+            spk_json["curve_oid"] = serde_json::Value::String(OID_EC_SM2.to_string());
+            spk_json["curve"] = serde_json::Value::String("sm2".to_string());
+            spk_json["bits"] = serde_json::Value::from(256);
+            spk_json["point_valid"] = serde_json::Value::from(point_valid);
+        }
+        _ => {}
+    }
 
     let san = match cert.subject_alternative_name() {
         Ok(Some(ext)) => {
@@ -298,7 +384,7 @@ fn x509_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Ve
         },
         "serial": format!("{:x}", cert.serial),
         "signature_algorithm": {
-            "oid": alg_oid,
+            "oid": sig_oid,
         },
         "issuer": cert.issuer().to_string(),
         "validity": {
@@ -314,10 +400,7 @@ fn x509_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Ve
                 .map_err(|e| anyhow::anyhow!("invalid not_after: {e}"))?,
         },
         "subject": cert.subject().to_string(),
-        "subject_public_key": {
-            "algorithm_oid": pki.algorithm.algorithm.to_string(),
-            "der_hex": hex::encode(pki.subject_public_key.clone()),
-        },
+        "subject_public_key": spk_json,
         "subject_alt_name": san,
     });
 
@@ -328,7 +411,7 @@ fn x509_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Ve
 // Format bridge: PKCS#1 <-> PKCS#8 (RSA)
 // ---------------------------------------------------------------------------
 
-/// `dpa:pkcs1:to:pkcs8` — re-wrap an RSA PEM key from PKCS#1 into PKCS#8.
+/// `dpa:pkcs1:to:pkcs8` - re-wrap an RSA PEM key from PKCS#1 into PKCS#8.
 /// Accepts either a private key (`RSA PRIVATE KEY`) or a public key
 /// (`RSA PUBLIC KEY`) and emits the PKCS#8 form (`PRIVATE KEY` / `PUBLIC KEY`).
 fn pkcs1_to_pkcs8(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
@@ -346,7 +429,7 @@ fn pkcs1_to_pkcs8(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Resu
     anyhow::bail!("input is not a PKCS#1 RSA PEM key (expected RSA PRIVATE KEY or RSA PUBLIC KEY)")
 }
 
-/// `dpa:pkcs8:to:pkcs1` — re-wrap an RSA PEM key from PKCS#8 back into PKCS#1.
+/// `dpa:pkcs8:to:pkcs1` - re-wrap an RSA PEM key from PKCS#8 back into PKCS#1.
 /// Accepts `PRIVATE KEY` (RSA) or `PUBLIC KEY` (RSA) and emits
 /// `RSA PRIVATE KEY` / `RSA PUBLIC KEY`.
 fn pkcs8_to_pkcs1(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
@@ -387,11 +470,13 @@ const OID_EC: &str = "1.2.840.10045.2.1";
 const OID_EC_P256: &str = "1.2.840.10045.3.1.7";
 const OID_EC_P384: &str = "1.3.132.0.10";
 const OID_EC_SECP256K1: &str = "1.3.132.0.34";
+/// SM2 curve / algorithm OID (GB/T 32918): 1.2.156.10197.1.301.
+pub(crate) const OID_EC_SM2: &str = "1.2.156.10197.1.301";
 
 /// Resolve the *concrete* algorithm OID of an SPKI: RSA encodes rsaEncryption in
 /// `algorithm`, while EC encodes id-ecPublicKey there and puts the named curve
 /// OID in `algorithm.parameters`.
-fn spki_algorithm_oid(spki: &x509_parser::x509::SubjectPublicKeyInfo<'_>) -> String {
+pub(crate) fn spki_algorithm_oid(spki: &x509_parser::x509::SubjectPublicKeyInfo<'_>) -> String {
     use x509_parser::asn1_rs::{FromDer, Oid};
     let algo = spki.algorithm.algorithm.to_string();
     if algo != OID_EC {
@@ -462,6 +547,23 @@ fn ec_jwk(crv: &str, sec1: &[u8]) -> anyhow::Result<Vec<u8>> {
                     .to_vec(),
             )
         }
+        "SM2" => {
+            // Reuse the sm2.rs curve-point validation (RustCrypto sm2 0.14,
+            // default GM/T 0003 distid) so x509/SPKI/jwk handling accepts the
+            // same points as dpa:sm2:verify.
+            use sm2::dsa::VerifyingKey;
+            let vk = VerifyingKey::from_sec1_bytes(SM2_DEFAULT_DISTID, sec1)
+                .map_err(|e| anyhow::anyhow!("invalid SM2 public key: {e}"))?;
+            let pt = vk.to_sec1_point(false);
+            (
+                pt.x()
+                    .ok_or_else(|| anyhow::anyhow!("missing x coordinate"))?
+                    .to_vec(),
+                pt.y()
+                    .ok_or_else(|| anyhow::anyhow!("missing y coordinate"))?
+                    .to_vec(),
+            )
+        }
         other => anyhow::bail!("unsupported EC curve OID '{other}'"),
     };
     let json = serde_json::json!({
@@ -473,7 +575,7 @@ fn ec_jwk(crv: &str, sec1: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(serde_json::to_vec(&json)?)
 }
 
-/// `dpa:pem:to:jwk` — convert a PEM public key (RSA or EC) into a JWK JSON object.
+/// `dpa:pem:to:jwk` - convert a PEM public key (RSA or EC) into a JWK JSON object.
 fn pem_to_jwk(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     use rsa::pkcs1::DecodeRsaPublicKey as _;
 
@@ -504,13 +606,14 @@ fn pem_to_jwk(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<V
         OID_EC_P256 => ec_jwk("P-256", spki.subject_public_key.data.as_ref()),
         OID_EC_P384 => ec_jwk("P-384", spki.subject_public_key.data.as_ref()),
         OID_EC_SECP256K1 => ec_jwk("secp256k1", spki.subject_public_key.data.as_ref()),
+        OID_EC_SM2 => ec_jwk("SM2", spki.subject_public_key.data.as_ref()),
         other => anyhow::bail!(
-            "unsupported public key algorithm OID '{other}' (only RSA / P-256 / P-384 / secp256k1)"
+            "unsupported public key algorithm OID '{other}' (only RSA / P-256 / P-384 / secp256k1 / SM2)"
         ),
     }
 }
 
-/// `dpa:jwk:to:pem` — convert a JWK JSON object (RSA or EC public key) into a PEM public key.
+/// `dpa:jwk:to:pem` - convert a JWK JSON object (RSA or EC public key) into a PEM public key.
 fn jwk_to_pem(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     use k256::elliptic_curve::sec1::FromSec1Point as _;
     use k256::pkcs8::EncodePublicKey as _;
@@ -601,13 +704,16 @@ fn jwk_to_pem(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<V
 // Verify-only signature checking (analysis domain: no signing, no key creation)
 // ---------------------------------------------------------------------------
 
-fn req_arg<'a>(args: &'a HashMap<String, String>, name: &str) -> anyhow::Result<&'a str> {
+pub(crate) fn req_arg<'a>(
+    args: &'a HashMap<String, String>,
+    name: &str,
+) -> anyhow::Result<&'a str> {
     args.get(name)
         .map(String::as_str)
         .ok_or_else(|| anyhow::anyhow!("missing required argument '{name}'"))
 }
 
-fn decode_sig(s: &str, fmt: &str) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn decode_sig(s: &str, fmt: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine;
     match fmt {
         "hex" => hex::decode(s).map_err(|e| anyhow::anyhow!("signature is not valid hex: {e}")),
@@ -618,17 +724,20 @@ fn decode_sig(s: &str, fmt: &str) -> anyhow::Result<Vec<u8>> {
     }
 }
 
-fn hash_input(input: &[u8], algo: &str) -> anyhow::Result<Vec<u8>> {
+pub(crate) fn hash_input(input: &[u8], algo: &str) -> anyhow::Result<Vec<u8>> {
     use sha2::Digest as _;
     Ok(match algo {
         "sha256" => sha2::Sha256::digest(input).to_vec(),
         "sha384" => sha2::Sha384::digest(input).to_vec(),
         "sha512" => sha2::Sha512::digest(input).to_vec(),
-        other => anyhow::bail!("unknown digest '{other}' (expected sha256 / sha384 / sha512)"),
+        "sm3" => sm3::Sm3::digest(input).to_vec(),
+        other => {
+            anyhow::bail!("unknown digest '{other}' (expected sha256 / sha384 / sha512 / sm3)")
+        }
     })
 }
 
-/// `dpa:rsa:verify` — verify an RSA signature (PKCS#1 v1.5 or PSS) over the
+/// `dpa:rsa:verify` - verify an RSA signature (PKCS#1 v1.5 or PSS) over the
 /// input message. The public key is passed via the `key` argument as PEM.
 /// Emits the UTF-8 text `true` / `false`.
 fn rsa_verify(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
@@ -696,7 +805,7 @@ fn rsa_verify(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Ve
     })
 }
 
-/// `dpa:ecdsa:verify` — verify an ECDSA signature (DER or raw r||s) over the
+/// `dpa:ecdsa:verify` - verify an ECDSA signature (DER or raw r||s) over the
 /// input message with a PEM EC public key. Curve is detected from the SPKI OID.
 /// Emits the UTF-8 text `true` / `false`.
 fn ecdsa_verify(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
@@ -826,10 +935,10 @@ fn ecdsa_verify_k256(
 }
 
 // ---------------------------------------------------------------------------
-// P1-5: CSR parsing, public-key extraction, PEM<->hex, SSH host keys, ASN.1 hex
+// CSR parsing, public-key extraction, PEM<->hex, SSH host keys, ASN.1 hex
 // ---------------------------------------------------------------------------
 
-/// `dpa:csr:parse` — parse a PKCS#10 Certificate Signing Request and emit a
+/// `dpa:csr:parse` - parse a PKCS#10 Certificate Signing Request and emit a
 /// JSON summary (subject, public key, signature algorithm, signature validity).
 fn csr_parse(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     use x509_parser::asn1_rs::FromDer;
@@ -863,7 +972,7 @@ fn csr_parse(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Ve
     Ok(serde_json::to_string_pretty(&json)?.into_bytes())
 }
 
-/// `dpa:pubkey:extract` — pull the SPKI out of a certificate or CSR and emit
+/// `dpa:pubkey:extract` - pull the SPKI out of a certificate or CSR and emit
 /// it as a PEM PUBLIC KEY block.
 fn pubkey_extract(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     use x509_parser::asn1_rs::FromDer;
@@ -884,29 +993,7 @@ fn pubkey_extract(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Resu
     Ok(pem_out.into_bytes())
 }
 
-/// `dpa:pem:to:hex` — strip a PEM envelope (or pass DER through) and hex-encode.
-fn pem_to_hex(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    let der: Vec<u8> = match pem::parse(input) {
-        Ok(p) => p.contents().to_vec(),
-        Err(_) => input.to_vec(),
-    };
-    Ok(hex::encode(der).into_bytes())
-}
-
-/// `dpa:hex:to:pem` — decode hex and wrap in a PEM block.
-fn hex_to_pem(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    let label = opt_arg(args, "label", "PUBLIC KEY");
-    let text = std::str::from_utf8(input).map_err(|_| anyhow::anyhow!("input is not hex text"))?;
-    let cleaned: String = text
-        .chars()
-        .filter(|c| c.is_ascii_hexdigit() || *c == ' ')
-        .collect();
-    let bytes = hex::decode(cleaned.replace(' ', ""))
-        .map_err(|e| anyhow::anyhow!("invalid hex input: {e}"))?;
-    Ok(pem::Pem::new(label, bytes).to_string().into_bytes())
-}
-
-/// `dpa:ssh:parse` — parse an OpenSSH public-key line (authorized_keys format)
+/// `dpa:ssh:parse` - parse an OpenSSH public-key line (authorized_keys format)
 /// and emit algorithm, bits, raw fields and the SHA256 fingerprint.
 fn ssh_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     let fmt = args
@@ -1130,8 +1217,25 @@ fn parse_pkcs8_spki(input: &[u8]) -> anyhow::Result<Vec<u8>> {
                 "point_hex": hex::encode(spki.subject_public_key.data.as_ref()),
             });
         }
+        OID_EC_SM2 => {
+            // SM2 (GB/T 32918): keep algorithm "SM2" so callers can tell the
+            // domestic curve apart from the NIST family. Point validity is
+            // checked by the same sm2.rs path used by dpa:sm2:verify.
+            use sm2::dsa::VerifyingKey;
+            VerifyingKey::from_sec1_bytes(
+                SM2_DEFAULT_DISTID,
+                spki.subject_public_key.data.as_ref(),
+            )
+            .map_err(|e| anyhow::anyhow!("invalid SM2 public key: {e}"))?;
+            json["algorithm"] = serde_json::Value::String("SM2".to_string());
+            json["bits"] = serde_json::Value::from(256);
+            json["fields"] = serde_json::json!({
+                "curve": "sm2",
+                "point_hex": hex::encode(spki.subject_public_key.data.as_ref()),
+            });
+        }
         other => anyhow::bail!(
-            "unsupported SPKI algorithm OID '{other}' (only RSA / P-256 / P-384 / secp256k1)"
+            "unsupported SPKI algorithm OID '{other}' (only RSA / P-256 / P-384 / secp256k1 / SM2)"
         ),
     }
     json["subject_public_key_hex"] =
@@ -1158,7 +1262,7 @@ fn mpint_bits(b: &[u8]) -> usize {
     bits - sh as usize
 }
 
-/// `dpa:asn1:parse` — recursive DER TLV walker that renders an ASN.1 tree as
+/// `dpa:asn1:parse` - recursive DER TLV walker that renders an ASN.1 tree as
 /// JSON. Accepts raw DER bytes or a hex string.
 fn asn1_parse(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
     let der: Vec<u8> = if looks_like_hex(input) {
@@ -1334,6 +1438,164 @@ fn oid_string(bytes: &[u8]) -> String {
     out.join(".")
 }
 
+// ---------------------------------------------------------------------------
+// SM2 (GB/T 32918) - merged from src/ops/sm2.rs (stage-1 refactor)
+// ---------------------------------------------------------------------------
+
+/// GM/T 0003 default distinguished identifier (16 bytes).
+/// Shared across x509/SPKI parsing so SM2 points are validated with the same
+/// default distid as `dpa:sm2:verify`.
+pub(crate) const SM2_DEFAULT_DISTID: &str = "1234567812345678";
+
+/// Parse a PEM envelope when present; otherwise treat the input as raw DER.
+fn strip_pem(input: &[u8]) -> Vec<u8> {
+    match pem::parse(input) {
+        Ok(p) => p.contents().to_vec(),
+        Err(_) => input.to_vec(),
+    }
+}
+
+fn parse_spki<'a>(der: &'a [u8]) -> anyhow::Result<x509_parser::x509::SubjectPublicKeyInfo<'a>> {
+    use x509_parser::asn1_rs::FromDer;
+    let (_, spki) = x509_parser::x509::SubjectPublicKeyInfo::from_der(der)
+        .map_err(|e| anyhow::anyhow!("not a valid PEM or DER SPKI public key: {e}"))?;
+    Ok(spki)
+}
+
+/// `dpa:sm2:parse` - parse an SM2 SPKI public key (PEM or DER) and emit a JSON
+/// summary: the SM2 algorithm OID, the uncompressed public-key point (hex) and
+/// whether the point is a valid SM2 curve point. Raw mode hex-dumps the DER.
+fn sm2_parse(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let der = strip_pem(input);
+    if let Some(v) = args.get("raw")
+        && parse_bool(v)?
+    {
+        return Ok(hex::encode(&der).into_bytes());
+    }
+
+    let spki = parse_spki(&der)?;
+    let oid = spki_algorithm_oid(&spki);
+    if oid != OID_EC_SM2 {
+        anyhow::bail!("not an SM2 public key (algorithm OID '{oid}', expected {OID_EC_SM2})");
+    }
+    let point = spki.subject_public_key.data.as_ref();
+    let point_valid = sm2::dsa::VerifyingKey::from_sec1_bytes(SM2_DEFAULT_DISTID, point).is_ok();
+
+    let json = serde_json::json!({
+        "algorithm_oid": oid,
+        "point_hex": hex::encode(point),
+        "point_valid": point_valid,
+        "key_type": "SM2",
+    });
+    Ok(format!("{}\n", serde_json::to_string_pretty(&json)?).into_bytes())
+}
+
+/// Parse an SM2 private key accepting PKCS#8 or SEC1, in PEM or raw DER form.
+fn parse_sm2_secret(input: &[u8]) -> anyhow::Result<(&'static str, sm2::SecretKey)> {
+    use sm2::pkcs8::DecodePrivateKey as _;
+    if let Ok(text) = std::str::from_utf8(input) {
+        if let Ok(sk) = sm2::SecretKey::from_pkcs8_pem(text) {
+            return Ok(("pkcs8", sk));
+        }
+        if let Ok(sk) = sm2::SecretKey::from_sec1_pem(text) {
+            return Ok(("sec1", sk));
+        }
+    }
+    if let Ok(sk) = sm2::SecretKey::from_pkcs8_der(input) {
+        return Ok(("pkcs8", sk));
+    }
+    if let Ok(sk) = sm2::SecretKey::from_sec1_der(input) {
+        return Ok(("sec1", sk));
+    }
+    anyhow::bail!("not a valid SM2 private key (expected PKCS#8 or SEC1 PEM/DER)")
+}
+
+/// `dpa:sm2:pubkey:extract` - derive the SPKI public-key PEM from a PKCS#8 or
+/// SEC1 SM2 private key.
+fn sm2_pubkey_extract(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    use sm2::pkcs8::EncodePublicKey as _;
+    use sm2::pkcs8::spki::der::pem::LineEnding;
+    let (_format, sk) = parse_sm2_secret(input)?;
+    let pem = sk
+        .public_key()
+        .to_public_key_pem(LineEnding::LF)
+        .map_err(|e| anyhow::anyhow!("failed to encode SM2 public key: {e}"))?;
+    Ok(pem.into_bytes())
+}
+
+/// `dpa:sm2:key:parse` - parse an SM2 private key (PKCS#8 / SEC1) and emit the
+/// private scalar (hex), the public point and the algorithm OID as JSON.
+fn sm2_key_parse(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    use sm2::elliptic_curve::sec1::ToSec1Point as _;
+
+    let (format, sk) = parse_sm2_secret(input)?;
+    let priv_hex = hex::encode(sk.to_bytes());
+    let point_hex = hex::encode(sk.public_key().to_sec1_point(false).as_bytes());
+
+    let json = serde_json::json!({
+        "format": format,
+        "algorithm_oid": OID_EC_SM2,
+        "private_key_hex": priv_hex,
+        "public_key_point": point_hex,
+    });
+    Ok(format!("{}\n", serde_json::to_string_pretty(&json)?).into_bytes())
+}
+
+/// `dpa:sm2:verify` - verify an SM2-with-SM3 signature over the input message.
+/// The public key is passed via the `key` argument as PEM or DER SPKI; the
+/// signature defaults to DER (`sig_type=der`), raw 64-byte r||s is accepted
+/// with `sig_type=raw`. The distinguished identifier defaults to the GM/T 0003
+/// value; pass `distid` to verify signatures created with a custom ID.
+/// Emits the UTF-8 text `true` / `false`.
+fn sm2_verify(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let key = req_arg(args, "key")?;
+    let digest = opt_arg(args, "digest", "sm3");
+    if digest != "sm3" {
+        anyhow::bail!("unknown digest '{digest}' (SM2-with-SM3 verification uses sm3 only)");
+    }
+    let distid = opt_arg(args, "distid", SM2_DEFAULT_DISTID);
+    let sig_type = opt_arg(args, "sig_type", "der");
+    let sig = decode_sig(
+        req_arg(args, "signature")?,
+        opt_arg(args, "sig_format", "hex"),
+    )?;
+
+    let der = strip_pem(key.as_bytes());
+    let spki = parse_spki(&der)?;
+    let oid = spki_algorithm_oid(&spki);
+    if oid != OID_EC_SM2 {
+        anyhow::bail!("unsupported SM2 public key OID '{oid}' (expected {OID_EC_SM2})");
+    }
+    let point = spki.subject_public_key.data.as_ref();
+
+    use sm2::dsa::signature::Verifier as _;
+    use sm2::dsa::{Signature, VerifyingKey};
+    let vk = VerifyingKey::from_sec1_bytes(distid, point)
+        .map_err(|e| anyhow::anyhow!("invalid SM2 public key: {e}"))?;
+    let signature = match sig_type {
+        "der" => {
+            Signature::from_der(&sig).map_err(|e| anyhow::anyhow!("invalid DER signature: {e}"))?
+        }
+        "raw" => {
+            if sig.len() != 64 {
+                anyhow::bail!("raw SM2 signature must be exactly 64 bytes (r||s)");
+            }
+            let sig_bytes = sm2::dsa::SignatureBytes::try_from(sig.as_slice())
+                .map_err(|_| anyhow::anyhow!("invalid raw signature length"))?;
+            Signature::from_bytes(&sig_bytes)
+                .map_err(|e| anyhow::anyhow!("invalid raw signature: {e}"))?
+        }
+        other => anyhow::bail!("unknown sig_type '{other}' (expected der or raw)"),
+    };
+
+    let ok = vk.verify(input, &signature).is_ok();
+    Ok(if ok {
+        b"true\n".to_vec()
+    } else {
+        b"false\n".to_vec()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1458,6 +1720,38 @@ sVvr8iW2eC+/vNtGw1jC1CI7mehGJbMw6YblVRXF\n\
         );
     }
 
+    #[test]
+    fn x509_parses_sm2_certificate() {
+        // SM2 self-signed certificate (openssl 3.5, SM2-with-SM3 signature,
+        // SPKI carries id-ecPublicKey + SM2 curve OID 1.2.156.10197.1.301).
+        let pem = std::fs::read("tests/data/sm2-cert.pem").unwrap();
+        let out = x509_parse(&pem, &HashMap::new()).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["version"], "V3");
+        assert_eq!(
+            v["signature_algorithm"]["oid"].as_str().unwrap(),
+            "1.2.156.10197.1.501",
+            "expected SM2-with-SM3 signature OID"
+        );
+        let spk = &v["subject_public_key"];
+        assert_eq!(spk["algorithm_oid"], "1.2.840.10045.2.1", "id-ecPublicKey");
+        assert_eq!(spk["curve_oid"], OID_EC_SM2);
+        assert_eq!(spk["curve"], "sm2");
+        assert_eq!(spk["bits"], 256);
+        assert_eq!(
+            spk["point_valid"], true,
+            "SM2 point must validate via sm2.rs"
+        );
+        assert!(!spk["der_hex"].as_str().unwrap().is_empty());
+
+        // DER input takes the same path.
+        let der = std::fs::read("tests/data/sm2-cert.der").unwrap();
+        let out = x509_parse(&der, &HashMap::new()).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["subject_public_key"]["curve"], "sm2");
+        assert_eq!(v["subject_public_key"]["point_valid"], true);
+    }
+
     // ------------------------------------------------------------------
     // PKCS#1 <-> PKCS#8 bridge (fixtures generated with openssl 3.5)
     // ------------------------------------------------------------------
@@ -1524,6 +1818,49 @@ sVvr8iW2eC+/vNtGw1jC1CI7mehGJbMw6YblVRXF\n\
         assert_eq!(v["crv"], "P-256");
         assert!(!v["x"].as_str().unwrap().is_empty());
         assert!(!v["y"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn pem_to_jwk_sm2() {
+        // SM2 public key (GM/T 0003 test vector) must convert to a JWK with
+        // crv=SM2; coordinates are the same 32-byte x/y as dpa:sm2:parse.
+        let pem = fixture("sm2-pub.pem");
+        let out = pem_to_jwk(pem.as_bytes(), &HashMap::new()).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["kty"], "EC");
+        assert_eq!(v["crv"], "SM2");
+        let x = v["x"].as_str().unwrap();
+        let y = v["y"].as_str().unwrap();
+        assert_eq!(x.len(), 43, "x must be 32 bytes unpadded b64url: {x}");
+        assert_eq!(y.len(), 43, "y must be 32 bytes unpadded b64url: {y}");
+        assert!(
+            !x.contains('=') && !y.contains('='),
+            "b64url must be unpadded"
+        );
+        assert_ne!(x, y);
+        assert_eq!(v["x"], "CNd64EwBzEwRBDYN2K9rb33zNCg9fBpq_VZSQHuHvuU");
+        assert_eq!(v["y"], "AU4qV8NsFQ0WMk3GZOMeZDI1lgnE55hHpbFhyMc2TIo");
+    }
+
+    #[test]
+    fn pkcs8_spki_parses_sm2() {
+        let pem = fixture("sm2-pub.pem");
+        // parse_pkcs8_spki accepts PEM text, DER bytes-as-hex or raw hex DER;
+        // pass the hex form of the DER bytes (binary DER is not valid UTF-8).
+        let der = pem_conv(pem.as_bytes(), &HashMap::new()).unwrap();
+        let hex_der = hex::encode(&der);
+        let out = parse_pkcs8_spki(hex_der.as_bytes()).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["format"], "PKCS#8 (SubjectPublicKeyInfo)");
+        assert_eq!(v["algorithm_oid"], OID_EC_SM2);
+        assert_eq!(v["algorithm"], "SM2");
+        assert_eq!(v["bits"], 256);
+        assert_eq!(v["fields"]["curve"], "sm2");
+        assert_eq!(
+            v["fields"]["point_hex"],
+            "0408d77ae04c01cc4c1104360dd8af6b6f7df334283d7c1a6afd5652407b87bee5\
+014e2a57c36c150d16324dc664e31e6432359609c4e79847a5b161c8c7364c8a"
+        );
     }
 
     #[test]
@@ -1610,7 +1947,7 @@ sVvr8iW2eC+/vNtGw1jC1CI7mehGJbMw6YblVRXF\n\
         assert_eq!(out, b"false\n");
     }
 
-    // --- P1-5: CSR / pubkey extract / PEM<->hex / SSH / ASN.1 -----------------
+    // --- CSR / pubkey extract / PEM<->hex / SSH / ASN.1 --------------------------
 
     const TEST_CSR_PEM: &str = "-----BEGIN CERTIFICATE REQUEST-----\n\
 MIICfzCCAWcCAQAwOjEYMBYGA1UEAwwPY3NyLmV4YW1wbGUuY29tMREwDwYDVQQK\n\
@@ -1651,24 +1988,6 @@ zx2rOs5uS1sa29sZLso1njAFww==\n\
         let s = String::from_utf8(out).unwrap();
         assert!(s.starts_with("-----BEGIN PUBLIC KEY-----"), "{s}");
         assert!(s.contains("-----END PUBLIC KEY-----"), "{s}");
-    }
-
-    #[test]
-    fn pem_to_hex_strips_envelope() {
-        let out = pem_to_hex(TEST_CERT_PEM.as_bytes(), &HashMap::new()).unwrap();
-        let s = String::from_utf8(out).unwrap();
-        // DER SEQUENCE (0x30 0x82 ...)
-        assert!(s.starts_with("3082"), "{s}");
-    }
-
-    #[test]
-    fn hex_to_pem_wraps_der() {
-        let mut args = HashMap::new();
-        args.insert("label".to_string(), "CERTIFICATE".to_string());
-        let out = hex_to_pem(b"68656c6c6f", &args).unwrap();
-        let s = String::from_utf8(out).unwrap();
-        assert!(s.starts_with("-----BEGIN CERTIFICATE-----"), "{s}");
-        assert!(s.contains("aGVsbG8="), "{s}");
     }
 
     #[test]
@@ -1739,7 +2058,7 @@ VwIDAQAB\n\
         assert!(s.contains("int_hex"), "{s}");
     }
 
-    // Review N3: deterministic fuzz sweep over the public-key / ASN.1 parsers.
+    // Deterministic fuzz sweep over the public-key / ASN.1 parsers.
     // Arbitrary bytes (random, truncated PEM, header-like prefixes) must never
     // panic; Err results are fine. A fixed LCG keeps the sweep reproducible
     // without pulling proptest into the dependency tree.
@@ -1786,5 +2105,358 @@ VwIDAQAB\n\
             let _ = asn1_parse(bytes, &HashMap::new());
             let _ = ssh_parse(bytes, &HashMap::new());
         }
+    }
+
+    // ---- SM2 tests (migrated from src/ops/sm2.rs) ----
+
+    const MSG: &[u8] = b"testing";
+    const DISTID: &str = "example@rustcrypto.org";
+    const PRIV_D: &str = "4BB8DF505722299592CBED4283B354A13FF5D3FEEB3A0660C5BDF3C87C559499";
+    const PUB_POINT: &str = "0408D77AE04C01CC4C1104360DD8AF6B6F7DF334283D7C1A6AFD5652407B87BEE5014E2A57C36C150D16324DC664E31E6432359609C4E79847A5B161C8C7364C8A";
+
+    fn sm2_fixture(name: &str) -> Vec<u8> {
+        std::fs::read(format!("tests/data/{name}"))
+            .unwrap_or_else(|e| panic!("missing fixture {name}: {e}"))
+    }
+
+    fn sm2_fixture_text(name: &str) -> String {
+        String::from_utf8(sm2_fixture(name)).unwrap()
+    }
+
+    fn pub_pem() -> String {
+        sm2_fixture_text("sm2-pub.pem")
+    }
+
+    fn pub_pem_from_der() -> String {
+        pem::Pem::new("PUBLIC KEY", sm2_fixture("sm2-pub.der")).to_string()
+    }
+
+    fn run_op(name: &str, input: &[u8], pairs: &[(&str, &str)]) -> anyhow::Result<Vec<u8>> {
+        let mut map: HashMap<String, String> = HashMap::new();
+        for (k, v) in pairs {
+            map.insert(k.to_string(), v.to_string());
+        }
+        for op in ops() {
+            if op.name == name {
+                return (op.run)(input, &map);
+            }
+        }
+        anyhow::bail!("op not found: {name}")
+    }
+
+    fn parse_json(out: &[u8]) -> serde_json::Value {
+        let text = String::from_utf8(out.to_vec()).unwrap();
+        let text = text.trim_end_matches('\n');
+        serde_json::from_str(text).unwrap_or_else(|e| panic!("invalid JSON output {text:?}: {e}"))
+    }
+
+    #[test]
+    fn sm2_parse_pem() {
+        let out = run_op("dpa:sm2:parse", &sm2_fixture("sm2-pub.pem"), &[]).unwrap();
+        let json = parse_json(&out);
+        assert_eq!(json["algorithm_oid"], OID_EC_SM2);
+        assert_eq!(
+            json["point_hex"].as_str().unwrap().to_uppercase(),
+            PUB_POINT
+        );
+        assert_eq!(json["point_valid"], true);
+        assert_eq!(json["key_type"], "SM2");
+    }
+
+    #[test]
+    fn sm2_parse_der() {
+        let out = run_op("dpa:sm2:parse", &sm2_fixture("sm2-pub.der"), &[]).unwrap();
+        let json = parse_json(&out);
+        assert_eq!(json["algorithm_oid"], OID_EC_SM2);
+        assert_eq!(json["point_valid"], true);
+    }
+
+    #[test]
+    fn sm2_parse_raw_mode() {
+        let out = run_op(
+            "dpa:sm2:parse",
+            &sm2_fixture("sm2-pub.der"),
+            &[("raw", "true")],
+        )
+        .unwrap();
+        let expected = hex::encode(sm2_fixture("sm2-pub.der"));
+        assert_eq!(String::from_utf8(out).unwrap().trim(), expected);
+    }
+
+    #[test]
+    fn sm2_parse_rejects_non_sm2_key() {
+        // An RSA SPKI must be rejected by the SM2 parser.
+        let rsa_der = std::fs::read("tests/data/rsa-pub.pem").unwrap();
+        let err = run_op("dpa:sm2:parse", &rsa_der, &[]).unwrap_err();
+        assert!(err.to_string().contains("not an SM2 public key"));
+    }
+
+    #[test]
+    fn sm2_parse_flags_invalid_point() {
+        let der = sm2_fixture("sm2-pub.der");
+        let mut bad = der.clone();
+        let n = bad.len();
+        bad[n - 1] ^= 0x01;
+        let out = run_op("dpa:sm2:parse", &bad, &[]).unwrap();
+        let json = parse_json(&out);
+        assert_eq!(json["point_valid"], false);
+    }
+
+    #[test]
+    fn sm2_key_parse_pkcs8_pem() {
+        let out = run_op("dpa:sm2:key:parse", &sm2_fixture("sm2-priv-pkcs8.pem"), &[]).unwrap();
+        let json = parse_json(&out);
+        assert_eq!(json["format"], "pkcs8");
+        assert_eq!(json["algorithm_oid"], OID_EC_SM2);
+        assert_eq!(
+            json["private_key_hex"].as_str().unwrap().to_uppercase(),
+            PRIV_D
+        );
+        assert_eq!(
+            json["public_key_point"].as_str().unwrap().to_uppercase(),
+            PUB_POINT
+        );
+    }
+
+    #[test]
+    fn sm2_key_parse_pkcs8_der() {
+        let out = run_op("dpa:sm2:key:parse", &sm2_fixture("sm2-priv-pkcs8.der"), &[]).unwrap();
+        let json = parse_json(&out);
+        assert_eq!(json["format"], "pkcs8");
+        assert_eq!(
+            json["private_key_hex"].as_str().unwrap().to_uppercase(),
+            PRIV_D
+        );
+        assert_eq!(
+            json["public_key_point"].as_str().unwrap().to_uppercase(),
+            PUB_POINT
+        );
+    }
+
+    #[test]
+    fn sm2_key_parse_sec1_der() {
+        let out = run_op("dpa:sm2:key:parse", &sm2_fixture("sm2-priv-sec1.der"), &[]).unwrap();
+        let json = parse_json(&out);
+        assert_eq!(json["format"], "sec1");
+        assert_eq!(json["algorithm_oid"], OID_EC_SM2);
+        assert_eq!(
+            json["private_key_hex"].as_str().unwrap().to_uppercase(),
+            PRIV_D
+        );
+        assert_eq!(
+            json["public_key_point"].as_str().unwrap().to_uppercase(),
+            PUB_POINT
+        );
+    }
+
+    #[test]
+    fn sm2_key_parse_rejects_garbage() {
+        let err = run_op("dpa:sm2:key:parse", b"not a key", &[]).unwrap_err();
+        assert!(err.to_string().contains("not a valid SM2 private key"));
+    }
+
+    #[test]
+    fn sm2_pubkey_extract_matches_spki() {
+        let out = run_op(
+            "dpa:sm2:pubkey:extract",
+            &sm2_fixture("sm2-priv-pkcs8.pem"),
+            &[],
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("-----BEGIN PUBLIC KEY-----"));
+        assert!(text.contains("-----END PUBLIC KEY-----"));
+        let parsed = run_op("dpa:sm2:parse", text.as_bytes(), &[]).unwrap();
+        let json = parse_json(&parsed);
+        assert_eq!(
+            json["point_hex"].as_str().unwrap().to_uppercase(),
+            PUB_POINT
+        );
+    }
+
+    #[test]
+    fn sm2_pubkey_extract_sec1_der() {
+        let out = run_op(
+            "dpa:sm2:pubkey:extract",
+            &sm2_fixture("sm2-priv-sec1.der"),
+            &[],
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("-----BEGIN PUBLIC KEY-----"));
+    }
+
+    #[test]
+    fn sm2_verify_official_vector_raw() {
+        let out = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &pub_pem()),
+                ("signature", &sm2_fixture_text("sm2-sig-raw.txt")),
+                ("sig_type", "raw"),
+                ("distid", DISTID),
+            ],
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "true\n");
+    }
+
+    #[test]
+    fn sm2_verify_official_vector_der() {
+        let out = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &pub_pem()),
+                ("signature", &sm2_fixture_text("sm2-sig-der.txt")),
+                ("sig_type", "der"),
+                ("distid", DISTID),
+            ],
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "true\n");
+    }
+
+    #[test]
+    fn sm2_verify_official_vector_der_key_from_der() {
+        let out = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &pub_pem_from_der()),
+                ("signature", &sm2_fixture_text("sm2-sig-der.txt")),
+                ("sig_type", "der"),
+                ("distid", DISTID),
+            ],
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "true\n");
+    }
+
+    #[test]
+    fn sm2_verify_rejects_tampered_message() {
+        let out = run_op(
+            "dpa:sm2:verify",
+            b"testing!",
+            &[
+                ("key", &pub_pem()),
+                ("signature", &sm2_fixture_text("sm2-sig-raw.txt")),
+                ("sig_type", "raw"),
+                ("distid", DISTID),
+            ],
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "false\n");
+    }
+
+    #[test]
+    fn sm2_verify_rejects_tampered_signature() {
+        let mut sig = hex::decode(sm2_fixture_text("sm2-sig-raw.txt")).unwrap();
+        sig[0] ^= 0x01;
+        let out = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &pub_pem()),
+                ("signature", &hex::encode(&sig)),
+                ("sig_type", "raw"),
+                ("distid", DISTID),
+            ],
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "false\n");
+    }
+
+    #[test]
+    fn sm2_verify_default_distid_sm3_digest() {
+        // Default distid and digest=sm3 are accepted; result stays false for a
+        // signature created with the custom distid.
+        let out = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &pub_pem()),
+                ("signature", &sm2_fixture_text("sm2-sig-raw.txt")),
+                ("sig_type", "raw"),
+                ("digest", "sm3"),
+            ],
+        )
+        .unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "false\n");
+    }
+
+    #[test]
+    fn sm2_verify_rejects_unsupported_digest() {
+        let err = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &pub_pem()),
+                ("digest", "sha256"),
+                ("signature", &sm2_fixture_text("sm2-sig-raw.txt")),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("sm3"));
+    }
+
+    #[test]
+    fn sm2_verify_rejects_short_raw_signature() {
+        let err = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &pub_pem()),
+                ("signature", "deadbeef"),
+                ("sig_type", "raw"),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("64 bytes"));
+    }
+
+    #[test]
+    fn sm2_verify_rejects_wrong_curve_key() {
+        // A P-256 SPKI must be rejected as an SM2 key.
+        let err = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &sm2_fixture_text("ec-pub.pem")),
+                ("signature", &sm2_fixture_text("sm2-sig-raw.txt")),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("SM2 public key OID"));
+    }
+
+    #[test]
+    fn sm2_verify_rejects_bad_key_material() {
+        let err = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &sm2_fixture_text("rsa-pub.pem")),
+                ("signature", &sm2_fixture_text("sm2-sig-raw.txt")),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("SM2 public key OID"));
+    }
+
+    #[test]
+    fn sm2_verify_rejects_unknown_sig_type() {
+        let err = run_op(
+            "dpa:sm2:verify",
+            MSG,
+            &[
+                ("key", &pub_pem()),
+                ("signature", &sm2_fixture_text("sm2-sig-raw.txt")),
+                ("sig_type", "pkcs1"),
+            ],
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("sig_type"));
     }
 }

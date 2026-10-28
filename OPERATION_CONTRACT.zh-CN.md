@@ -67,7 +67,7 @@
 `kind` 含子路径（`url:decode`、`to:date`、`to:pem`）即为 `Variant`，其余默认
 `Primary`。`Shortcut` 一律在注册处显式标注。
 
-`Op` 目前是 `{ name, category, family, kind, level, description, args, run,
+`Op` 是 `{ name, category, family, kind, level, description, args, run,
 stream }`。`dpa list` 展示 Category / Family / Kind / Op / Description 五列；
 `dpa ops <名字>` 展示 family、kind 与 level。当前数量以 `dpa list` 为准。
 
@@ -120,7 +120,7 @@ stream }`。`dpa list` 展示 Category / Family / Kind / Op / Description 五列
 | 支撑 | 较窄但仍需可用的操作，如 `de:bruijn`、`prime`、`hotp`、`totp` | 结果正确、接口可用，不追求参数深度 |
 | 不做 | 与本工具目的无关的操作 | 不实现，文档中也不承诺 |
 
-新增操作先定归属再实现，让投入落在承载流程的操作上，而不是表面覆盖。
+操作按层级分配投入，让精力落在承载流程的操作上，而不是表面覆盖。
 
 ## 7. 新增参数的做法
 

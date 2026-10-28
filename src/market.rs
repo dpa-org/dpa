@@ -15,9 +15,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::flow::{Flow, FlowMeta};
+use crate::flow::{Flow, FlowMeta, from_yaml};
 use crate::i18n;
 use crate::ops;
+use std::fmt::Write as FmtWrite;
 
 /// Package format id.
 pub const PACKAGE_FORMAT: &str = "dpa-flow";
@@ -38,55 +39,72 @@ pub struct SharePackage {
 }
 
 /// `dpa flow manifest <flow.yaml>`: print manifest + per-step op availability.
-pub fn cmd_manifest(flow_path: &str) -> anyhow::Result<()> {
+pub fn cmd_manifest(flow_path: &str) -> anyhow::Result<String> {
+    let mut buf = String::new();
     let flow = load_flow(flow_path)?;
     let meta = flow.meta.clone().unwrap_or_default();
 
     match (&flow.name, &flow.description) {
-        (Some(n), Some(d)) => println!("{}", i18n::tf("msg.flow_meta", &[n.as_str(), d.as_str()])),
-        (Some(n), None) => println!("{}", i18n::tf("msg.flow_name", &[n.as_str()])),
-        (None, Some(d)) => println!("{}", i18n::tf("msg.flow_desc", &[d.as_str()])),
+        (Some(n), Some(d)) => {
+            writeln!(
+                buf,
+                "{}",
+                i18n::tf("msg.flow_meta", &[n.as_str(), d.as_str()])
+            )?;
+        }
+        (Some(n), None) => {
+            writeln!(buf, "{}", i18n::tf("msg.flow_name", &[n.as_str()]))?;
+        }
+        (None, Some(d)) => {
+            writeln!(buf, "{}", i18n::tf("msg.flow_desc", &[d.as_str()]))?;
+        }
         (None, None) => {}
     }
 
-    println!(
+    writeln!(
+        buf,
         "{}",
         i18n::tf("msg.flow_id", &[meta.id.as_deref().unwrap_or("-")])
-    );
-    println!(
+    )?;
+    writeln!(
+        buf,
         "{}",
         i18n::tf(
             "msg.flow_version",
             &[meta.version.as_deref().unwrap_or("-")]
         )
-    );
-    println!(
+    )?;
+    writeln!(
+        buf,
         "{}",
         i18n::tf("msg.flow_author", &[meta.author.as_deref().unwrap_or("-")])
-    );
-    println!(
+    )?;
+    writeln!(
+        buf,
         "{}",
         i18n::tf(
             "msg.flow_license",
             &[meta.license.as_deref().unwrap_or("-")]
         )
-    );
+    )?;
     if meta.tags.is_empty() {
-        println!("{}", i18n::t("msg.flow_tags_none"));
+        writeln!(buf, "{}", i18n::t("msg.flow_tags_none"))?;
     } else {
-        println!(
+        writeln!(
+            buf,
             "{}",
             i18n::tf("msg.flow_tags", &[meta.tags.join(", ").as_str()])
-        );
+        )?;
     }
     if let Some(h) = &meta.homepage {
-        println!("{}", i18n::tf("msg.flow_homepage", &[h.as_str()]));
+        writeln!(buf, "{}", i18n::tf("msg.flow_homepage", &[h.as_str()]))?;
     }
 
-    println!(
+    writeln!(
+        buf,
         "{}",
         i18n::tf("msg.flow_steps", &[flow.steps.len().to_string().as_str()])
-    );
+    )?;
     for (idx, step) in flow.steps.iter().enumerate() {
         let ok = ops::find_op(&step.op).is_some();
         let marker = if ok {
@@ -94,13 +112,14 @@ pub fn cmd_manifest(flow_path: &str) -> anyhow::Result<()> {
         } else {
             i18n::t("msg.step_missing")
         };
-        println!("  [{}] {} ({})", idx + 1, step.op, marker);
+        writeln!(buf, "  [{}] {} ({})", idx + 1, step.op, marker)?;
     }
-    Ok(())
+    Ok(buf)
 }
 
 /// `dpa flow export <flow.yaml> [-o out.dpaflow]`: wrap into a shareable package.
-pub fn cmd_export(flow_path: &str, out_path: Option<&str>) -> anyhow::Result<()> {
+pub fn cmd_export(flow_path: &str, out_path: Option<&str>) -> anyhow::Result<String> {
+    let mut buf = String::new();
     let flow = load_flow(flow_path)?;
     if flow.steps.is_empty() {
         anyhow::bail!("{}", i18n::t("err.empty_steps"));
@@ -124,7 +143,7 @@ pub fn cmd_export(flow_path: &str, out_path: Option<&str>) -> anyhow::Result<()>
         // flow is flattened into the package YAML.
         flow: Flow { meta: None, ..flow },
     };
-    let yaml = serde_yaml::to_string(&pkg).map_err(|e| {
+    let yaml = serde_saphyr::to_string(&pkg).map_err(|e| {
         anyhow::anyhow!(
             "{}",
             i18n::tf("err.pkg_serialize", &[e.to_string().as_str()])
@@ -135,42 +154,44 @@ pub fn cmd_export(flow_path: &str, out_path: Option<&str>) -> anyhow::Result<()>
         Some(p) => PathBuf::from(p),
         None => default_pkg_path(flow_path),
     };
-    if let Some(parent) = out.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                anyhow::anyhow!(
-                    "{}",
-                    i18n::tf("err.create_outdir_failed", &[e.to_string().as_str()])
-                )
-            })?;
-        }
+    if let Some(parent) = out.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            anyhow::anyhow!(
+                "{}",
+                i18n::tf("err.create_outdir_failed", &[i18n::os_error(&e).as_str()])
+            )
+        })?;
     }
     std::fs::write(&out, yaml).map_err(|e| {
         anyhow::anyhow!(
             "{}",
-            i18n::tf("err.create_outfile_failed", &[e.to_string().as_str()])
+            i18n::tf("err.create_outfile_failed", &[i18n::os_error(&e).as_str()])
         )
     })?;
 
-    println!(
+    writeln!(
+        buf,
         "{}",
         i18n::tf("msg.flow_exported", &[out.display().to_string().as_str()])
-    );
-    Ok(())
+    )?;
+    Ok(buf)
 }
 
 /// `dpa flow import <file.dpaflow> [-o dir]`: validate and install a package.
 ///
 /// Every step op must exist in the local registry; the flow is written into the
 /// output directory (or next to the package) as a plain flow YAML, ready to run.
-pub fn cmd_import(pkg_path: &str, out_dir: Option<&str>) -> anyhow::Result<()> {
+pub fn cmd_import(pkg_path: &str, out_dir: Option<&str>) -> anyhow::Result<String> {
+    let mut buf = String::new();
     let yaml = std::fs::read_to_string(pkg_path).map_err(|e| {
         anyhow::anyhow!(
             "{}",
-            i18n::tf("err.read_pkg_failed", &[e.to_string().as_str()])
+            i18n::tf("err.read_pkg_failed", &[i18n::os_error(&e).as_str()])
         )
     })?;
-    let pkg: SharePackage = serde_yaml::from_str(&yaml)
+    let pkg: SharePackage = from_yaml(&yaml)
         .map_err(|e| anyhow::anyhow!("{}", i18n::tf("err.pkg_parse", &[e.to_string().as_str()])))?;
 
     if pkg.format != PACKAGE_FORMAT {
@@ -225,7 +246,7 @@ pub fn cmd_import(pkg_path: &str, out_dir: Option<&str>) -> anyhow::Result<()> {
     std::fs::create_dir_all(&dir).map_err(|e| {
         anyhow::anyhow!(
             "{}",
-            i18n::tf("err.create_outdir_failed", &[e.to_string().as_str()])
+            i18n::tf("err.create_outdir_failed", &[i18n::os_error(&e).as_str()])
         )
     })?;
 
@@ -235,7 +256,7 @@ pub fn cmd_import(pkg_path: &str, out_dir: Option<&str>) -> anyhow::Result<()> {
     // self-describing once the package wrapper is gone.
     let mut flow = pkg.flow;
     flow.meta = Some(pkg.meta.clone());
-    let flow_yaml = serde_yaml::to_string(&flow).map_err(|e| {
+    let flow_yaml = serde_saphyr::to_string(&flow).map_err(|e| {
         anyhow::anyhow!(
             "{}",
             i18n::tf("err.pkg_serialize", &[e.to_string().as_str()])
@@ -244,18 +265,19 @@ pub fn cmd_import(pkg_path: &str, out_dir: Option<&str>) -> anyhow::Result<()> {
     std::fs::write(&out, flow_yaml).map_err(|e| {
         anyhow::anyhow!(
             "{}",
-            i18n::tf("err.create_outfile_failed", &[e.to_string().as_str()])
+            i18n::tf("err.create_outfile_failed", &[i18n::os_error(&e).as_str()])
         )
     })?;
 
-    println!(
+    writeln!(
+        buf,
         "{}",
         i18n::tf(
             "msg.flow_imported",
             &[out.display().to_string().as_str(), id.as_str()]
         )
-    );
-    Ok(())
+    )?;
+    Ok(buf)
 }
 
 /// Load and parse a flow file.
@@ -263,10 +285,10 @@ fn load_flow(path: &str) -> anyhow::Result<Flow> {
     let yaml = std::fs::read_to_string(path).map_err(|e| {
         anyhow::anyhow!(
             "{}",
-            i18n::tf("err.read_flow_failed", &[e.to_string().as_str()])
+            i18n::tf("err.read_flow_failed", &[path, i18n::os_error(&e).as_str()])
         )
     })?;
-    serde_yaml::from_str(&yaml).map_err(|e| {
+    from_yaml(&yaml).map_err(|e| {
         anyhow::anyhow!(
             "{}",
             i18n::tf("err.parse_flow_failed", &[e.to_string().as_str()])
@@ -354,8 +376,7 @@ mod tests {
         cmd_import(pkg_path.to_str().unwrap(), Some(out_dir.to_str().unwrap())).unwrap();
         let installed = out_dir.join("dpa-flow-demo.yaml");
         assert!(installed.exists());
-        let flow: Flow =
-            serde_yaml::from_str(&std::fs::read_to_string(&installed).unwrap()).unwrap();
+        let flow: Flow = from_yaml(&std::fs::read_to_string(&installed).unwrap()).unwrap();
         assert_eq!(flow.steps.len(), 2);
         assert_eq!(flow.steps[0].op, "dpa:base64:decode");
         let meta = flow.meta.unwrap();
@@ -383,7 +404,7 @@ mod tests {
                 ..Default::default()
             },
         };
-        std::fs::write(&pkg_path, serde_yaml::to_string(&pkg).unwrap()).unwrap();
+        std::fs::write(&pkg_path, serde_saphyr::to_string(&pkg).unwrap()).unwrap();
 
         let err = cmd_import(pkg_path.to_str().unwrap(), Some(dir.to_str().unwrap())).unwrap_err();
         assert!(err.to_string().contains("dpa:no:such-op"));

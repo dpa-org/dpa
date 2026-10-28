@@ -69,8 +69,7 @@ dpa does not look for plugins on its own:
 
    The `stream` field holds a streaming factory function; an operation that
    processes the whole input at once simply omits the field (`stream: None` is
-   not accepted). `plugins/demo` shows both paths, and `plugins/ascii85` is a
-   whole-buffer-only example.
+   not accepted). `plugins/demo` shows both paths.
 
 3. Build the crate, then load the resulting library with `dpa --plugins <dir>`.
 
