@@ -163,6 +163,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Release workflow validation**: release builds now compare the embedded
+  12-character commit with the triggering tag SHA, Windows smoke tests parse
+  the final operation count without treating a trailing blank line as zero and
+  check every native command's exit status, and the Linux cross-toolchain
+  download fails closed with retries before the build starts. The differential
+  suite is now a required release job with pinned reference dependencies.
 - **Leading UTF-8 BOM in flow YAML**: a BOM is stripped before parsing instead
   of producing a YAML error.
 - **Plugin panics no longer abort the host**: panics crossing the plugin ABI

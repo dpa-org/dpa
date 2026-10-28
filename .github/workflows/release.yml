@@ -16,7 +16,7 @@ jobs:
     name: quality-gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -56,13 +56,13 @@ jobs:
       # VCRUNTIME140.dll, which is not part of a stock Windows install).
       RUSTFLAGS: -C target-feature=+crt-static
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -82,9 +82,15 @@ jobs:
         run: |
           $dirty = git status --porcelain
           if ($dirty) { Write-Error "release tree is not clean:`n$dirty" }
+          $cargoVer = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches[0].Groups[1].Value
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12)
           $v = & .\target\release\dpa.exe --version
           Write-Output $v
-          if ($v -notmatch $env:GITHUB_SHA) { Write-Error "version commit does not match GITHUB_SHA=$env:GITHUB_SHA" }
+          if ($LASTEXITCODE -ne 0) { Write-Error "dpa --version failed with exit code $LASTEXITCODE" }
+          $expected = "^dpa $([regex]::Escape($cargoVer)) \(commit $([regex]::Escape($shortSha)), \d{4}-\d{2}-\d{2}\)$"
+          if ($v -notmatch $expected) {
+            Write-Error "version does not match Cargo.toml version '$cargoVer' and GITHUB_SHA short '$shortSha': $v"
+          }
 
       - name: Package
         shell: pwsh
@@ -117,15 +123,20 @@ jobs:
           $input = "$env:RUNNER_TEMP\smoke\in.txt"
           Set-Content -Path $input -Value "Hello" -NoNewline -Encoding ascii
           & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "packaged binary failed --version with exit code $LASTEXITCODE" }
           $encoded = & $exe op base64:encode $input
-          if ($encoded -ne "SGVsbG8=") { throw "unexpected output from the packaged binary: $encoded" }
-          $countLine = (& $exe list | Select-Object -Last 1)
+          if ($LASTEXITCODE -ne 0) { throw "packaged binary failed base64:encode with exit code $LASTEXITCODE" }
+          if (($encoded -join "`n").Trim() -ne "SGVsbG8=") { throw "unexpected output from the packaged binary: $encoded" }
+          $listOutput = @(& $exe --lang en list)
+          if ($LASTEXITCODE -ne 0) { throw "packaged binary failed list with exit code $LASTEXITCODE" }
+          $countLine = $listOutput | Where-Object { $_ -match '\d+\s+op\(s\)\s+in total\.' } | Select-Object -Last 1
+          if (-not $countLine) { throw "op count line missing from list output" }
           $count = [int]([regex]::Match($countLine, '\d+').Value)
           if ($count -lt 200) { throw "unexpected op count: $countLine" }
           Write-Output "smoke test ok: $countLine"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dpa-windows
           # Archives and their checksums only; the unpacked directories would
@@ -148,13 +159,13 @@ jobs:
     env:
       RUSTFLAGS: -C target-feature=+crt-static
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -191,15 +202,20 @@ jobs:
           $input = "$env:RUNNER_TEMP\smoke\in.txt"
           Set-Content -Path $input -Value "Hello" -NoNewline -Encoding ascii
           & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "packaged binary failed --version with exit code $LASTEXITCODE" }
           $encoded = & $exe op base64:encode $input
-          if ($encoded -ne "SGVsbG8=") { throw "unexpected output from the packaged binary: $encoded" }
-          $countLine = (& $exe list | Select-Object -Last 1)
+          if ($LASTEXITCODE -ne 0) { throw "packaged binary failed base64:encode with exit code $LASTEXITCODE" }
+          if (($encoded -join "`n").Trim() -ne "SGVsbG8=") { throw "unexpected output from the packaged binary: $encoded" }
+          $listOutput = @(& $exe --lang en list)
+          if ($LASTEXITCODE -ne 0) { throw "packaged binary failed list with exit code $LASTEXITCODE" }
+          $countLine = $listOutput | Where-Object { $_ -match '\d+\s+op\(s\)\s+in total\.' } | Select-Object -Last 1
+          if (-not $countLine) { throw "op count line missing from list output" }
           $count = [int]([regex]::Match($countLine, '\d+').Value)
           if ($count -lt 200) { throw "unexpected op count: $countLine" }
           Write-Output "smoke test ok: $countLine"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dpa-windows-arm64
           path: |
@@ -212,7 +228,7 @@ jobs:
     needs: [quality]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -225,11 +241,15 @@ jobs:
           sudo apt-get install -y musl-tools qemu-user-static
           # aarch64 musl cross toolchain from musl.cc (prebuilt, no sysroot
           # needed; statically linked, so the result also runs under QEMU)
-          curl -sL https://musl.cc/aarch64-linux-musl-cross.tgz | tar -xz -C /tmp
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 20 --max-time 300 \
+            -o /tmp/aarch64-linux-musl-cross.tgz \
+            https://musl.cc/aarch64-linux-musl-cross.tgz
+          tar -xzf /tmp/aarch64-linux-musl-cross.tgz -C /tmp
+          test -x /tmp/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc
           echo "/tmp/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -297,7 +317,7 @@ jobs:
           done
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dpa-linux
           path: |
@@ -311,7 +331,7 @@ jobs:
     needs: [quality]
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -319,7 +339,7 @@ jobs:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -368,7 +388,7 @@ jobs:
           "$bin" list | tail -n 1
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dpa-macos
           path: |
@@ -377,14 +397,43 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
-  release:
-    name: publish-release
-    needs: [build-windows, build-windows-arm64, build-linux, build-macos]
+  difftest:
+    name: differential-tests
+    needs: [quality]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --features cli
+
+      - name: Install Python deps
+        run: python3 -m pip install --disable-pip-version-check -r requirements-difftest.txt
+
+      - name: Run differential tests
+        run: python3 scripts/difftest.py --exe target/release/dpa --cases all --strict
+
+  release:
+    name: publish-release
+    needs: [build-windows, build-windows-arm64, build-linux, build-macos, difftest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 

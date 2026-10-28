@@ -1,0 +1,7 @@
+# Reference implementations used by scripts/difftest.py.
+Brotli==1.2.0
+gmssl==3.2.2
+pycryptodome==3.23.0
+pysm4==0.7.2
+whirlpool==1.1.2
+xxhash==3.6.0
