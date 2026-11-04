@@ -97,7 +97,7 @@ libloading = "0.9"
 rayon = "1.10"
 walkdir = "2"
 # bzip2 (libbz2 C bindings - host-only, see compress.rs cfg gate)
-bzip2 = { version = "0.4" }
+bzip2 = { version = "0.6" }
 
 # v1.0 public-key analysis domain (analysis-only: no encrypt/sign). Host-only:
 # rsa/p256/p384/k256 pull rand_core->getrandom which has no wasm32-unknown-unknown
