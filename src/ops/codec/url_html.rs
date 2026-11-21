@@ -768,7 +768,7 @@ fn parse_qp_wrap(args: &HashMap<String, String>) -> anyhow::Result<usize> {
     }
 }
 
-/// RFC 2047 §4.2 Q-encoding safe characters (besides '=').
+/// RFC 2047 section 4.2 Q-encoding safe characters (besides '=').
 fn qp_q_safe(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'!' | b'*' | b'+' | b'-' | b'/')
 }

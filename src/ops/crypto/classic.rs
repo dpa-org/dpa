@@ -9,10 +9,12 @@ use super::*;
 use crate::i18n;
 use ::aes::cipher::KeyInit;
 use blowfish::Blowfish;
-use blowfish::cipher::{BlockDecrypt as BfBlockDecrypt, BlockEncrypt as BfBlockEncrypt};
+use blowfish::cipher::{
+    BlockCipherDecrypt as BfBlockDecrypt, BlockCipherEncrypt as BfBlockEncrypt,
+};
 use byteorder::BE;
 use des::TdesEde3;
-use des::cipher::{BlockDecrypt as DesBlockDecrypt, BlockEncrypt as DesBlockEncrypt};
+use des::cipher::{BlockCipherDecrypt as DesBlockDecrypt, BlockCipherEncrypt as DesBlockEncrypt};
 use std::collections::HashMap;
 pub fn ops() -> Vec<Op> {
     vec![
@@ -473,13 +475,13 @@ impl BlockCipherOps for TdesEde3 {
     const BLOCK: usize = 8;
 
     fn encrypt(&self, blk: &mut [u8]) {
-        let mut b = des::cipher::Block::<TdesEde3>::clone_from_slice(blk);
+        let mut b = des::cipher::Block::<TdesEde3>::try_from(&*blk).expect("invalid block length");
         DesBlockEncrypt::encrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }
 
     fn decrypt(&self, blk: &mut [u8]) {
-        let mut b = des::cipher::Block::<TdesEde3>::clone_from_slice(blk);
+        let mut b = des::cipher::Block::<TdesEde3>::try_from(&*blk).expect("invalid block length");
         DesBlockDecrypt::decrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }
@@ -490,13 +492,15 @@ impl BlockCipherOps for Blowfish<BE> {
     const BLOCK: usize = 8;
 
     fn encrypt(&self, blk: &mut [u8]) {
-        let mut b = blowfish::cipher::Block::<Blowfish<BE>>::clone_from_slice(blk);
+        let mut b =
+            blowfish::cipher::Block::<Blowfish<BE>>::try_from(&*blk).expect("invalid block length");
         BfBlockEncrypt::encrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }
 
     fn decrypt(&self, blk: &mut [u8]) {
-        let mut b = blowfish::cipher::Block::<Blowfish<BE>>::clone_from_slice(blk);
+        let mut b =
+            blowfish::cipher::Block::<Blowfish<BE>>::try_from(&*blk).expect("invalid block length");
         BfBlockDecrypt::decrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }

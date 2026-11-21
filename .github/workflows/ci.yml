@@ -47,7 +47,7 @@ jobs:
         run: cargo build -p dpa-plugin-demo
 
       - name: test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: i18n key parity
         run: python3 scripts/check_i18n_keys.py
@@ -104,7 +104,7 @@ jobs:
         run: cargo build -p dpa-plugin-demo
 
       - name: test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   # Differential tests: compare core ops against independent Python
   # implementations. A missing reference or mismatch fails the job.
@@ -166,3 +166,11 @@ jobs:
 
       - name: check wasm32 (lib, no-default)
         run: cargo check -p dpa --target wasm32-unknown-unknown --lib --no-default-features
+
+      # The Python feature combination needs its own build coverage because
+      # it adds a separate cdylib link stage.
+      # Only the lib target is checked — `cargo test --all-features` fails at
+      # the bin link stage (dpa_python.def references the unresolved export
+      # PyInit_dpa), so a lib-only check avoids that known combination gap.
+      - name: check python feature (lib)
+        run: cargo check -p dpa --lib --features python

@@ -201,6 +201,8 @@ err.step_failed = Step {} ({}) failed: {}
 err.stream_failed = Streaming failed: {}
 err.stream_finished = Stream already finished
 err.stream_read_failed = Failed to read input stream: {}
+err.cancelled = Execution cancelled by the caller
+err.timeout = Execution exceeded the {} ms timeout window
 err.system_time = System time error: {}
 err.tea_key_len = TEA family key must be 16 bytes (got {})
 err.tea_block_misaligned = TEA input length not aligned to 8-byte block; use padding=pkcs7 or none
@@ -450,3 +452,6 @@ explain.step = Step {} ({}): {} -> {}
 explain.out_unknown = unknown
 explain.out_fixed = {} bytes
 explain.out_ratio = ~{} bytes ({} / {} ratio)
+err.yaml_parse = YAML parse failed: {}
+err.output_not_utf8 = Structured view failed: output is not valid UTF-8
+msg.op_output_kind = Output kind: {}

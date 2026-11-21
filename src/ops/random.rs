@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rand::{Rng, RngCore};
+use rand::{Rng, RngExt};
 
 use super::{ArgSpec, Op};
 use crate::i18n;
@@ -794,10 +794,10 @@ fn base32_decode(s: &str) -> anyhow::Result<Vec<u8>> {
 
 /// HMAC over `data` with `key` for the OTP family (RFC 4226 / RFC 6238).
 fn otp_hmac(algo: &str, key: &[u8], data: &[u8]) -> anyhow::Result<Vec<u8>> {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     macro_rules! run {
         ($t:ty) => {{
-            let mut mac = <$t as Mac>::new_from_slice(key).map_err(|e| {
+            let mut mac = <$t>::new_from_slice(key).map_err(|e| {
                 anyhow::anyhow!("{}", i18n::tf("err.hmac_init", &[e.to_string().as_str()]))
             })?;
             mac.update(data);

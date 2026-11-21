@@ -103,6 +103,13 @@ is in [docs/op-semantics.md](docs/op-semantics.md).
   formats (URL, CHEF, JSON), so an existing recipe can be moved into a flow.
 - **Python bindings** (optional `python` feature): `import dpa` and run flows in
   memory.
+- **Host execution control**: `EngineConfig.timeout` and `EngineConfig.cancel`
+  bound any flow at step / chunk checkpoints; hosts get structured
+  `TIMEOUT` / `CANCELLED` errors and can run batches through the public
+  `run_batch` API (`jobs` workers, per-item failure isolation).
+- **`desktop` feature**: GUI/desktop consumers link the engine without the
+  CLI argument-parser / shell-completion layer via
+  `--no-default-features --features desktop`.
 - **Localized messages**: user-facing text (errors, CLI help, listing output) is
   available in English (default) and Simplified Chinese (`--lang zh-CN`, or
   `DPA_LANG=zh`).
@@ -312,9 +319,49 @@ steps:
 print(out)  # b"68656c6c6f"
 ```
 
-The module exports `run`, `run_batch`, `run_file`, `list_ops`, and `op`. See
-[examples/python_demo.py](examples/python_demo.py) for the batch and file-based
-entry points.
+The module exports `run`, `run_batch`, `run_file`, `list_ops`, `op`,
+`run_op`, and `inspect`.
+
+### Single-operation execution: `run_op`
+
+```python
+r = dpa.run_op("dpa:hex:encode", args={"delimiter": "colon"}, data=b"abc")
+print(r)  # b"61:62:63"
+```
+
+`run_op(name, args=None, data=b"")` builds a one-step flow and runs it through
+the same engine as `dpa run`, returning the raw pipeline bytes. `data` accepts
+`str` (encoded as UTF-8) or `bytes`; `args` is an optional `dict` of string
+argument values.
+
+### Structured views: `inspect`
+
+```python
+# The final op declares output_kind, so inspect parses the pipeline bytes
+# accordingly (dpa:json:to-yaml declares yaml -> Python dict)
+v = dpa.inspect("""
+steps:
+  - op: dpa:json:to-yaml
+""", data=b'{"a":1,"b":[1,2]}')
+print(v)  # {'a': 1, 'b': [1, 2]}
+
+# An explicit output_kind overrides the declaration
+h = dpa.inspect("steps:\n  - op: dpa:hex:encode\n", data=b"\x01\x02",
+                output_kind="utf8")
+print(h)  # '0102'
+
+# Undeclared ops fall back to raw bytes
+b = dpa.inspect("steps:\n  - op: dpa:reverse\n", data=b"abc")
+print(b)  # b'cba'
+```
+
+`inspect(flow_yaml, data=b"", output_kind=None)` runs a flow through the bytes
+pipeline and converts the final result. The conversion target resolves in this
+order: explicit `output_kind` argument -> the final op's declared `output_kind`
+-> `bytes` fallback. Supported kinds are `bytes`, `utf8`, `json`, `yaml` and
+`hex`; `json` / `yaml` return Python `dict` / `list` values, and `hex` validates
+the text with the shared hex parser (see
+[OPERATION_CONTRACT.md](OPERATION_CONTRACT.md)).
 
 ## Documentation
 
@@ -431,7 +478,7 @@ When built from a git checkout, `dpa --version` prints the package version, the
 commit it was built from, and the commit date:
 
 ```
-dpa 1.0.0 (commit 66d05b838b01, 2026-10-25)
+dpa 1.0.0 (commit <short-sha>, YYYY-MM-DD)
 ```
 
 - Sources without a `.git` directory (release tarballs) fall back to the bare
@@ -454,8 +501,8 @@ dpa 1.0.0 (commit 66d05b838b01, 2026-10-25)
 
 ## Roadmap
 
-`1.0.0` is the first public release. The flow format, operation identifiers, and
-CLI surface are treated as stable from here on; see
+`1.0.0` is the first stable release. The flow format, operation identifiers, and
+CLI surface are treated as stable from that release on; see
 [OPERATION_CONTRACT.md](OPERATION_CONTRACT.md).
 
 - **1.x**: additive changes — new operations, new optional arguments, new output

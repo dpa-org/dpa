@@ -301,6 +301,13 @@ pub fn show_op(name: &str) -> anyhow::Result<String> {
     if op.output != crate::ops::OpIO::Unspecified {
         writeln!(buf, "{}", i18n::tf("msg.op_output", &[op.output.display()]))?;
     }
+    if op.output_kind != crate::ops::OutputKind::Bytes {
+        writeln!(
+            buf,
+            "{}",
+            i18n::tf("msg.op_output_kind", &[op.output_kind.display()])
+        )?;
+    }
     // Every op that emits raw binary by default carries the same
     // "pipe to hex/utf8:escape to view" hint that `random` already had.
     if op.output == crate::ops::OpIO::Raw {

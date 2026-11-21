@@ -456,7 +456,7 @@ pub fn to_url(ops: &[RecipeOp], input: Option<&[u8]>) -> String {
 
 // ============================ Translation ============================
 
-/// Translate recipe op names to the target language (zh→en / en→zh); names not in the map are kept as-is.
+/// Translate recipe op names to the target language (zh->en / en->zh); names not in the map are kept as-is.
 pub fn translate(ops: &[RecipeOp], lang: Lang) -> Vec<RecipeOp> {
     ops.iter()
         .map(|op| {
@@ -476,7 +476,7 @@ pub fn translate(ops: &[RecipeOp], lang: Lang) -> Vec<RecipeOp> {
 
 // ============================ Top-level conversion ============================
 
-/// Top-level conversion entry: parse → (optional) translate → serialize.
+/// Top-level conversion entry: parse -> (optional) translate -> serialize.
 ///
 /// URL inputs carry their input data automatically; URL outputs pass the input
 /// data through (when the input has input data and the target format is URL).
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     fn chef_flag_followed_by_op_name() {
-        // /breakpointLabel → breakpoint flag + op "Label"
+        // /breakpointLabel -> breakpoint flag + op "Label"
         let ops = from_chef("Fork('\\\\n',false)/breakpointLabel('base64')/disabled").unwrap();
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[0].op, "Fork");

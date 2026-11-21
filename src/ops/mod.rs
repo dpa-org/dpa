@@ -23,6 +23,24 @@ macro_rules! op {
             level: $crate::ops::derive_level(&$kind),
             input: $crate::ops::OpIO::Unspecified,
             output: $crate::ops::OpIO::Unspecified,
+            output_kind: $crate::ops::OutputKind::Bytes,
+            description: $desc.to_string(),
+            example: None,
+            args: $args,
+            run: Box::new($run),
+            stream: None,
+        }
+    };
+    ($name:expr, $category:expr, $family:expr, $kind:expr, $desc:expr, $args:expr, $run:expr, $out_kind:expr) => {
+        $crate::ops::Op {
+            name: $name.to_string(),
+            category: $category.to_string(),
+            family: $family.to_string(),
+            kind: $kind.to_string(),
+            level: $crate::ops::derive_level(&$kind),
+            input: $crate::ops::OpIO::Unspecified,
+            output: $crate::ops::OpIO::Unspecified,
+            output_kind: $out_kind,
             description: $desc.to_string(),
             example: None,
             args: $args,
@@ -41,6 +59,26 @@ macro_rules! op {
             ),
             input: $crate::ops::OpIO::Unspecified,
             output: $crate::ops::OpIO::Unspecified,
+            output_kind: $crate::ops::OutputKind::Bytes,
+            description: $desc.to_string(),
+            example: None,
+            args: $args,
+            run: Box::new($run),
+            stream: None,
+        }
+    };
+    ($name:expr, $category:expr, $desc:expr, $args:expr, $run:expr, $out_kind:expr) => {
+        $crate::ops::Op {
+            name: $name.to_string(),
+            category: $category.to_string(),
+            family: $crate::ops::derive_family_kind(&$name, &$category).0,
+            kind: $crate::ops::derive_family_kind(&$name, &$category).1,
+            level: $crate::ops::derive_level(
+                &$crate::ops::derive_family_kind(&$name, &$category).1,
+            ),
+            input: $crate::ops::OpIO::Unspecified,
+            output: $crate::ops::OpIO::Unspecified,
+            output_kind: $out_kind,
             description: $desc.to_string(),
             example: None,
             args: $args,
@@ -64,6 +102,24 @@ macro_rules! stream_op {
             level: $crate::ops::derive_level(&$kind),
             input: $crate::ops::OpIO::Unspecified,
             output: $crate::ops::OpIO::Unspecified,
+            output_kind: $crate::ops::OutputKind::Bytes,
+            description: $desc.to_string(),
+            example: None,
+            args: $args,
+            run: Box::new($run),
+            stream: Some(Box::new($make)),
+        }
+    };
+    ($name:expr, $category:expr, $family:expr, $kind:expr, $desc:expr, $args:expr, $run:expr, $make:expr, $out_kind:expr) => {
+        $crate::ops::Op {
+            name: $name.to_string(),
+            category: $category.to_string(),
+            family: $family.to_string(),
+            kind: $kind.to_string(),
+            level: $crate::ops::derive_level(&$kind),
+            input: $crate::ops::OpIO::Unspecified,
+            output: $crate::ops::OpIO::Unspecified,
+            output_kind: $out_kind,
             description: $desc.to_string(),
             example: None,
             args: $args,
@@ -82,6 +138,26 @@ macro_rules! stream_op {
             ),
             input: $crate::ops::OpIO::Unspecified,
             output: $crate::ops::OpIO::Unspecified,
+            output_kind: $crate::ops::OutputKind::Bytes,
+            description: $desc.to_string(),
+            example: None,
+            args: $args,
+            run: Box::new($run),
+            stream: Some(Box::new($make)),
+        }
+    };
+    ($name:expr, $category:expr, $desc:expr, $args:expr, $run:expr, $make:expr, $out_kind:expr) => {
+        $crate::ops::Op {
+            name: $name.to_string(),
+            category: $category.to_string(),
+            family: $crate::ops::derive_family_kind(&$name, &$category).0,
+            kind: $crate::ops::derive_family_kind(&$name, &$category).1,
+            level: $crate::ops::derive_level(
+                &$crate::ops::derive_family_kind(&$name, &$category).1,
+            ),
+            input: $crate::ops::OpIO::Unspecified,
+            output: $crate::ops::OpIO::Unspecified,
+            output_kind: $out_kind,
             description: $desc.to_string(),
             example: None,
             args: $args,
@@ -114,7 +190,7 @@ use crate::i18n;
 /// Parameter value format: explicit replacement for the implicit
 /// `'0x..'` magic prefix. `Utf8` is the default and matches historical
 /// behavior; `Hex` / `Base64` / `Number` / `Bool` make the parsing contract
-/// explicit. See OPERATION_CONTRACT.md §4.
+/// explicit. See OPERATION_CONTRACT.md section 4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ArgFormat {
     /// UTF-8 bytes (historical default).
@@ -307,12 +383,16 @@ pub struct Op {
     /// `random:hex` = `random` -> `hex:encode`). Defaults to Primary; used for the
     /// statistical dimension ("M families / N ops, including K shortcuts").
     pub level: OpLevel,
-    /// Declared input data shape for the engine's step-chain type check (§4).
+    /// Declared input data shape for the engine's step-chain type check (section 4).
     /// `Unspecified` (default) opts out of the check; explicit declarations are
     /// validated between adjacent steps (engine reports a hint when they clash).
     pub input: OpIO,
     /// Declared output data shape; see [`Op::input`].
     pub output: OpIO,
+    /// Declared output shape for the structured-view API (`inspect`).
+    /// Read-only metadata: never consulted by the execution pipeline.
+    /// Defaults to [`OutputKind::Bytes`] unless declared at registration.
+    pub output_kind: OutputKind,
     pub description: String,
     /// Optional i18n example key (`op.<name>.example`); rendered by `show_op`
     /// as an `Examples:` section when set.
@@ -325,7 +405,7 @@ pub struct Op {
     pub stream: Option<StreamFactory>,
 }
 
-/// Granularity level of an op: the "statistical dimension" of §3.
+/// Granularity level of an op: the "statistical dimension" of section 3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OpLevel {
     /// Independent transform (`aes:encrypt`, `base64:decode`).
@@ -348,7 +428,7 @@ impl OpLevel {
     }
 }
 
-/// Declared data shape of an op's input / output (§4). The engine checks
+/// Declared data shape of an op's input / output (section 4). The engine checks
 /// the step chain only between *explicitly declared* neighbours: if both the
 /// upstream `output` and the current step's `input` are declared (non-Unspecified)
 /// and differ, it reports a mismatch hint (e.g. `random(raw) -> hex:decode(hex)`
@@ -379,6 +459,54 @@ impl OpIO {
             OpIO::Hex => "hex",
             OpIO::Base64 => "base64",
             OpIO::Json => "json",
+        }
+    }
+}
+
+/// Declared output shape of an op for the structured-view API (`inspect`,
+/// see `crate::api`). Read-only metadata: the execution pipeline never
+/// consults it, so adding a declaration cannot change runtime behaviour.
+/// `Bytes` is the default and matches the historical pipeline shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputKind {
+    /// Raw bytes (historical default; also the fallback for ops that do not
+    /// declare any structured output).
+    #[default]
+    Bytes,
+    /// UTF-8 text.
+    Utf8,
+    /// JSON document.
+    Json,
+    /// YAML document (parsed to the shared JSON-compatible DOM, matching
+    /// `yaml:to-json`).
+    Yaml,
+    /// Hex-encoded text.
+    Hex,
+}
+
+impl OutputKind {
+    /// Stable lowercase identifier used by `dpa ops <name>` and the Python
+    /// binding's `output_kind` argument.
+    pub fn display(&self) -> &'static str {
+        match self {
+            OutputKind::Bytes => "bytes",
+            OutputKind::Utf8 => "utf8",
+            OutputKind::Json => "json",
+            OutputKind::Yaml => "yaml",
+            OutputKind::Hex => "hex",
+        }
+    }
+
+    /// Parse a lowercase identifier back into an [`OutputKind`]; returns
+    /// `None` for unknown names.
+    pub fn parse(s: &str) -> Option<OutputKind> {
+        match s.to_ascii_lowercase().as_str() {
+            "bytes" => Some(OutputKind::Bytes),
+            "utf8" => Some(OutputKind::Utf8),
+            "json" => Some(OutputKind::Json),
+            "yaml" => Some(OutputKind::Yaml),
+            "hex" => Some(OutputKind::Hex),
+            _ => None,
         }
     }
 }
@@ -441,9 +569,37 @@ pub fn builtin_ops() -> Vec<Op> {
     ops.extend(random::ops());
     ops.extend(regex::ops());
     apply_io_declarations(&mut ops);
+    apply_output_kind_declarations(&mut ops);
     apply_shortcut_marks(&mut ops);
     apply_examples(&mut ops);
     ops
+}
+
+/// Declared structured output shapes for the `inspect` API. Read-only
+/// metadata layered on top of [`apply_io_declarations`]: this table only
+/// drives the structured-view layer and is never consulted by the execution
+/// pipeline. New ops may also declare `output_kind` directly through the
+/// registration macros (op!/stream_op! trailing argument); keeping the
+/// existing ops here mirrors the central IO table and avoids churning every
+/// registration call site.
+fn apply_output_kind_declarations(ops: &mut [Op]) {
+    use OutputKind::*;
+    let set = |ops: &mut [Op], name: &str, kind: OutputKind| {
+        for op in ops.iter_mut() {
+            if op.name == name {
+                op.output_kind = kind;
+            }
+        }
+    };
+    // -- codec: hex text ---------------------------------------------------
+    set(ops, "dpa:hex:encode", Hex);
+    // -- codec: structured <-> text (JSON/YAML/XML produce parseable docs) --
+    set(ops, "dpa:json:to-yaml", Yaml);
+    set(ops, "dpa:yaml:to-json", Json);
+    set(ops, "dpa:xml:to-json", Json);
+    // -- json family -------------------------------------------------------
+    set(ops, "dpa:json:pretty", Json);
+    set(ops, "dpa:json:minify", Json);
 }
 
 /// Central `Examples:` annotations. High-frequency and multi-argument
@@ -490,7 +646,7 @@ fn apply_examples(ops: &mut [Op]) {
 /// Central shortcut marks: op chains composed of two or more primitives get
 /// promoted to `OpLevel::Shortcut` here (single source of truth), instead of
 /// scattering `o.level = Shortcut` across modules. The name-based derivation
-/// cannot infer these, so they must be explicit. Keep in sync with the §4
+/// cannot infer these, so they must be explicit. Keep in sync with the section 4
 /// declaration table where the composite also declares its IO shape.
 fn apply_shortcut_marks(ops: &mut [Op]) {
     for op in ops.iter_mut() {
@@ -522,7 +678,7 @@ fn apply_shortcut_marks(ops: &mut [Op]) {
     }
 }
 
-/// Central §4 type declarations: mark the data shape of every built-in op so
+/// Central section 4 type declarations: mark the data shape of every built-in op so
 /// the engine can type-check step chains. Ops left `Unspecified` opt out of the
 /// check; coverage is additive and never changes runtime behaviour. Keep the
 /// table grouped by module and in sync with `apply_shortcut_marks`.
@@ -536,7 +692,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
             }
         }
     };
-    // ── random / generators ───────────────────────────────────────────────
+    // -- random / generators -----------------------------------------------
     set(ops, "dpa:random", Unspecified, Raw);
     set(ops, "dpa:random:hex", Unspecified, Hex);
     set(ops, "dpa:uuid", Unspecified, Utf8);
@@ -550,14 +706,14 @@ fn apply_io_declarations(ops: &mut [Op]) {
     set(ops, "dpa:hotp", Unspecified, Utf8);
     set(ops, "dpa:totp", Unspecified, Utf8);
     set(ops, "dpa:prime", Unspecified, Utf8);
-    // ── hex / base64 boundary (text encodings) ────────────────────────────
+    // -- hex / base64 boundary (text encodings) ----------------------------
     set(ops, "dpa:hex:encode", Raw, Hex);
     set(ops, "dpa:hex:decode", Hex, Raw);
     set(ops, "dpa:base64:encode", Raw, Base64);
     set(ops, "dpa:base64:decode", Base64, Raw);
     set(ops, "dpa:base64:url:encode", Raw, Base64);
     set(ops, "dpa:base64:url:decode", Base64, Raw);
-    // ── codec: text encodings of arbitrary bytes ──────────────────────────
+    // -- codec: text encodings of arbitrary bytes --------------------------
     set(ops, "dpa:base32:encode", Raw, Utf8);
     set(ops, "dpa:base32:decode", Utf8, Raw);
     set(ops, "dpa:base45:encode", Raw, Utf8);
@@ -585,7 +741,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
     // utf16 emits raw wide-char bytes, not text.
     set(ops, "dpa:utf16:encode", Utf8, Raw);
     set(ops, "dpa:utf16:decode", Raw, Utf8);
-    // ── codec: text <-> text transforms ───────────────────────────────────
+    // -- codec: text <-> text transforms -----------------------------------
     set(ops, "dpa:url:encode", Utf8, Utf8);
     set(ops, "dpa:url:decode", Utf8, Utf8);
     set(ops, "dpa:html:encode", Utf8, Utf8);
@@ -594,18 +750,18 @@ fn apply_io_declarations(ops: &mut [Op]) {
     set(ops, "dpa:punycode:decode", Utf8, Utf8);
     set(ops, "dpa:utf8:escape", Utf8, Utf8);
     set(ops, "dpa:utf8:unescape", Utf8, Utf8);
-    // ── codec: structured <-> text ────────────────────────────────────────
+    // -- codec: structured <-> text ----------------------------------------
     set(ops, "dpa:json:to-xml", Json, Utf8);
     set(ops, "dpa:json:to-yaml", Json, Utf8);
     set(ops, "dpa:xml:to-json", Utf8, Json);
     set(ops, "dpa:yaml:to-json", Utf8, Json);
-    // ── json boundary ─────────────────────────────────────────────────────
+    // -- json boundary -----------------------------------------------------
     set(ops, "dpa:json:pretty", Json, Json);
     set(ops, "dpa:json:minify", Json, Json);
     set(ops, "dpa:json:get", Json, Utf8);
     set(ops, "dpa:json:to-csv", Json, Utf8);
     set(ops, "dpa:csv:to-json", Utf8, Json);
-    // ── hash: raw bytes in, raw digest out ────────────────────────────────
+    // -- hash: raw bytes in, raw digest out --------------------------------
     for h in [
         "adler32",
         "blake2b:256",
@@ -649,12 +805,12 @@ fn apply_io_declarations(ops: &mut [Op]) {
     set(ops, "dpa:ssdeep", Raw, Utf8);
     set(ops, "dpa:ssdeep:compare", Utf8, Utf8);
     set(ops, "dpa:luhn", Utf8, Utf8);
-    // ── compress ──────────────────────────────────────────────────────────
+    // -- compress ----------------------------------------------------------
     for c in ["brotli", "bzip2", "deflate", "gzip", "lzma", "zlib"] {
         set(ops, &format!("dpa:{c}:compress"), Raw, Raw);
         set(ops, &format!("dpa:{c}:decompress"), Raw, Raw);
     }
-    // ── crypto / cipher: raw in, raw out ──────────────────────────────────
+    // -- crypto / cipher: raw in, raw out ----------------------------------
     for c in [
         "aes:encrypt",
         "aes:decrypt",
@@ -683,7 +839,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
     ] {
         set(ops, &format!("dpa:{c}"), Raw, Raw);
     }
-    // ── analyze / extract: text in, text out ──────────────────────────────
+    // -- analyze / extract: text in, text out ------------------------------
     set(ops, "dpa:entropy", Raw, Utf8);
     set(ops, "dpa:analyze:file:type", Raw, Utf8);
     set(ops, "dpa:analyze:hash", Raw, Utf8);
@@ -704,7 +860,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
     ] {
         set(ops, &format!("dpa:{a}"), Utf8, Utf8);
     }
-    // ── transform: text transforms ────────────────────────────────────────
+    // -- transform: text transforms ----------------------------------------
     for t in [
         "add:line-numbers",
         "atbash",
@@ -739,7 +895,7 @@ fn apply_io_declarations(ops: &mut [Op]) {
     ] {
         set(ops, &format!("dpa:{t}"), Utf8, Utf8);
     }
-    // ── transform: byte-level ops ─────────────────────────────────────────
+    // -- transform: byte-level ops -----------------------------------------
     for t in [
         "bitwise:and",
         "bitwise:or",
@@ -757,11 +913,11 @@ fn apply_io_declarations(ops: &mut [Op]) {
     ] {
         set(ops, &format!("dpa:{t}"), Raw, Raw);
     }
-    // ── datetime ──────────────────────────────────────────────────────────
+    // -- datetime ----------------------------------------------------------
     set(ops, "dpa:datetime:parse", Utf8, Utf8);
     set(ops, "dpa:datetime:delta", Utf8, Utf8);
     set(ops, "dpa:datetime:translate", Utf8, Utf8);
-    // ── pubkey: textual key formats ───────────────────────────────────────
+    // -- pubkey: textual key formats ---------------------------------------
     for k in [
         "pem",
         "pem:to:jwk",
@@ -782,12 +938,12 @@ fn apply_io_declarations(ops: &mut [Op]) {
     ] {
         set(ops, &format!("dpa:{k}"), Utf8, Utf8);
     }
-    // ── protocol: hex text in, json text out; strips keep raw payloads ────
+    // -- protocol: hex text in, json text out; strips keep raw payloads ----
     for p in ["ethernet", "ipv4", "ipv6", "tcp", "tls", "udp"] {
         set(ops, &format!("dpa:parse:{p}"), Utf8, Utf8);
         set(ops, &format!("dpa:strip:{p}"), Raw, Raw);
     }
-    // ── regex ─────────────────────────────────────────────────────────────
+    // -- regex -------------------------------------------------------------
     set(ops, "dpa:regex:match", Utf8, Utf8);
     set(ops, "dpa:regex:replace", Utf8, Utf8);
     // `fork` is a control step (engine skips it) and stays Unspecified.
@@ -888,7 +1044,7 @@ mod tests {
         assert!(find_op("dpa:no:such:op").is_none());
     }
 
-    /// §3 statistical dimension: level derivation rule and the explicit
+    /// section 3 statistical dimension: level derivation rule and the explicit
     /// shortcut marker on `random:hex`.
     #[test]
     fn derive_level_rules() {

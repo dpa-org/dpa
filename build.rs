@@ -10,10 +10,34 @@ fn main() {
     // every non-Windows build of the cdylib fail, so gate it on the target.
     let target = std::env::var("TARGET").unwrap_or_default();
     if target.ends_with("-windows-msvc") {
-        println!(
-            "cargo:rustc-link-arg=/DEF:{}\\dpa.def",
-            manifest_dir.replace('/', "\\")
-        );
+        // The python binding's module entry (PyInit_dpa) is produced by the
+        // pyo3 #[pymodule] macro as a #[no_mangle] export, but an empty
+        // /DEF: whitelist hides *every* symbol - including PyInit_dpa - so
+        // `import dpa` would fail with "cannot find module entry point".
+        // With the python feature enabled, generate a temporary def that
+        // re-exports PyInit_dpa on top of the base whitelist; otherwise keep
+        // the deliberately-empty dpa.def (zero C ABI surface).
+        let def_path = if std::env::var("CARGO_FEATURE_PYTHON").is_ok() {
+            let out_dir = std::env::var("OUT_DIR").unwrap();
+            let def = std::path::Path::new(&out_dir).join("dpa_python.def");
+            let mut text = String::from("EXPORTS\n    PyInit_dpa\n");
+            if let Ok(base) =
+                std::fs::read_to_string(std::path::Path::new(&manifest_dir).join("dpa.def"))
+            {
+                for line in base.lines() {
+                    let t = line.trim();
+                    if !t.is_empty() && !t.starts_with(';') && t != "EXPORTS" {
+                        text.push_str(t);
+                        text.push('\n');
+                    }
+                }
+            }
+            std::fs::write(&def, text).expect("write dpa_python.def");
+            def.display().to_string()
+        } else {
+            format!("{}\\dpa.def", manifest_dir.replace('/', "\\"))
+        };
+        println!("cargo:rustc-link-arg=/DEF:{}", def_path.replace('/', "\\"));
     }
     println!("cargo:rerun-if-changed=dpa.def");
 

@@ -655,6 +655,7 @@ fn build_plugin_ops() -> Vec<Op> {
                 level,
                 input: crate::ops::OpIO::Unspecified,
                 output: crate::ops::OpIO::Unspecified,
+                output_kind: crate::ops::OutputKind::Bytes,
                 description,
                 example: None,
                 args: op.args,

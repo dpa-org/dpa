@@ -4,12 +4,111 @@ All notable changes to dpa are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0-rc3] - 2026-11-22
+
+### Added
+
+- **Structured execution-result outlet** (`src/api.rs`): `run_op` executes a
+  single operation by name through the engine's one-step flow path and
+  returns the raw pipeline bytes; `inspect` runs an arbitrary flow through
+  the existing bytes pipeline and converts the final result to a structured
+  value (`Structured::Bytes/Utf8/Json/Yaml/Hex`) according to the op's
+  declared `output_kind` (or an explicit override); `to_structured` performs
+  the conversion.
+- **`OutputKind` metadata**: ops register a read-only `output_kind`
+  (`bytes` / `utf8` / `json` / `yaml` / `hex`) via the registration macro or
+  the central declaration table (`apply_output_kind_declarations`, e.g.
+  `hex:encode` -> Hex, `json:to-yaml` -> Yaml, `xml:to-json` -> Json). The
+  execution pipeline never consults it; `inspect` and `list_ops` / `op` do.
+- **Python bindings**: `run_op` / `inspect` pyfunctions (`data` accepts
+  `str | bytes`; structured returns map to the Rust `Structured` enum), and
+  `list_ops` / `op` now include `output_kind`.
+- **Windows import fix**: `build.rs` emits a temporary `dpa_python.def`
+  exporting `PyInit_dpa` when the `python` feature is enabled on MSVC, so
+  `import dpa` works after linking against the deliberately-empty `dpa.def`.
+- **Engine execution control** (`src/engine.rs`, `src/error.rs`): `EngineConfig`
+  gains `timeout: Option<Duration>` and `cancel: Option<Arc<AtomicBool>>`
+  for embedding consumers and long-running jobs. Polled at step / chunk
+  checkpoints — `Timeout`
+  once the wall-clock window elapses, `Cancelled` when the shared flag is set;
+  both surface as new structured error codes `TIMEOUT` / `CANCELLED`
+  (`category: "run"`) with i18n messages (`err.timeout` / `err.cancelled`, en
+  + zh-CN). `with_allow_env` now treats `Some(empty)` as a true empty
+  whitelist (reject **all** `env:` reads) instead of falling back to
+  allow-any.
+- **Public batch outlet** (`src/api.rs`): `run_batch` runs a flow against a
+  slice of inputs, returning one `Result` per item in input order with
+  per-item failure isolation (mirrors the CLI batch path). Non-wasm builds
+  parallelize through rayon (`jobs` workers, `0` = `available_parallelism`);
+  wasm builds stay serial. Per-item engine limits (caps, timeout, cancel) come
+  from one shared `EngineConfig`.
+- **`desktop` feature** (`Cargo.toml`): `cli` becomes a real feature
+  (`dep:clap`, `dep:clap_complete`); clap / clap_complete are optional and
+  only compiled under `cli` (default). GUI/desktop consumers link the engine
+  without the argument-parser / shell-completion layer via
+  `--no-default-features --features desktop` (rayon + public-key analysis
+  deps stay default).
 
 ### Changed
 
 - Updated `base64` to 0.23, `ecb` to 0.2, and `libloading` to 0.9 after
   workspace-wide compatibility checks.
+- Updated `serde_json` to 1.0.154.
+- Updated `rand` to 0.10 and `getrandom` to 0.4:
+  RngCore is no longer re-exported from `rand`; `fill_bytes` now comes from
+  `rand::Rng` and `random()` from `rand::RngExt` (`src/ops/random.rs`,
+  `src/ops/crypto/aes.rs`). WASM build verified with getrandom `wasm_js`.
+- Updated `num-bigint` to 0.5: call sites in
+  `src/ops/random.rs` (prime generation) remain API-compatible; verified
+  with `dpa op prime` at 128/256/1024 bits.
+- Updated `pem` to 4.0: `pem::parse` / `Pem::new` /
+  `EncodeConfig` call sites in `src/ops/pubkey.rs` remain API-compatible;
+  verified with PEM encode/decode round-trip.
+- Updated `quick-xml` to 0.42: event payloads are now
+  `BytesText` / `BytesCData` and attribute name/value expose `&str` instead of
+  `&[u8]`; adapted `src/ops/codec/format.rs` accordingly (drop redundant
+  UTF-8 conversions); verified with XML->JSON->XML round-trip including CDATA
+  and attribute handling.
+- Updated `brotli` to 9.1: `enc::BrotliEncoderParams`
+  / `BrotliCompress` / `BrotliDecompress` call sites in `src/ops/compress.rs`
+  remain API-compatible; verified compress/decompress round-trip on release
+  binary.
+- Updated `serde-saphyr` to 2.0: breaking changes in
+  2.0 only affect `Error::AliasError` construction and multi-document
+  deserialization bounds; dpa uses `to_string` / `from_str_with_options` /
+  `options!` which are unchanged, so no call-site adaptation was needed;
+  verified YAML<->JSON round-trip on release binary and wasm32 build of
+  `dpa-wasm`.
+- **`dpa-wasm` `run_batch` parity** (`dpa-wasm/src/lib.rs`): the wasm export
+  now mirrors the native API — signature `run_batch(flow, inputs,
+  output_format?, jobs?)`, failed items keep their input slot and carry a
+  structured error JSON string instead of aborting the whole batch; wasm stays
+  serial (`jobs` is accepted and ignored).
+- Updated the RustCrypto password stack to digest 0.11 / cipher 0.5:
+  `aes` 0.9, `blowfish` 0.10, `cbc` 0.2, `hkdf`
+  0.13, `hmac` 0.13, `pbkdf2` 0.13, `md-5` 0.11, `md4` 0.11, `ripemd` 0.2,
+  `sha1` 0.11, `sha2` 0.11, `sha3` 0.12, `sm3` 0.5, `sm4` 0.6, `whirlpool`
+  0.11, plus the previously missed `des` 0.9.0 and `blake2` 0.11.0.
+  Adaptations: hybrid-array 0.4 deprecated `clone_from_slice` /
+  `from_mut_slice` in favor of `Block::try_from(&blk[..])` (13 sites in
+  `src/ops/cipher.rs`, `src/ops/crypto/aes.rs`, `src/ops/crypto/classic.rs`,
+  `src/ops/hash.rs`); removed a duplicate `KeyInit` import in
+  `src/ops/cipher.rs`; explicit turbofish `<$t>::new_from_slice` inside the
+  `run!` / `do_hmac!` macros (`src/ops/random.rs`,
+  `src/ops/crypto/hmac_kdf.rs`); `blake2` 0.11 exposes only the generic
+  `Blake2b<OutSize>`, so `type Blake2b384 = Blake2b<U48>` was added and
+  ambiguous `update` calls were disambiguated via `Update::update`
+  (`src/ops/hash.rs`); `des` 0.9 uses `BlockCipherEncrypt` /
+  `BlockCipherDecrypt` instead of the removed `BlockEncrypt` /
+  `BlockDecrypt` traits (`src/ops/hash.rs`); `sha3` 0.12 does not provide
+  `CoreProxy`, so the `SimpleHmac` wrapper was replaced by a hand-rolled
+  `HmacSha3Stream` in `src/ops/crypto/hmac_kdf.rs`. Verified with
+  workspace build, tests, and clippy, plus release-binary round-trips:
+  BLAKE2b-256/384/512 and BLAKE2s-256 against standard
+  vectors, SHA-1/SHA-256/SHA3-256/SM3/MD5/MD4/RIPEMD-160 vectors,
+  DES/AES/SM4 encrypt->decrypt round-trips (ECB/CBC/GCM), HMAC-SHA1/SHA256/
+  SHA3-256/SHA3-512, PBKDF2-SHA256 (RFC 7914 vector), HKDF-SHA256 (RFC 5869
+  vector), SM4-CMAC, LM-hash and NT-hash.
 
 ### Security
 
@@ -314,4 +413,5 @@ First public release.
 - ChaCha20 keystream is limited to 256 GiB per key/nonce pair (RFC 8439
   32-bit counter); re-key before that.
 
+[1.0.0-rc3]: https://github.com/dpa-org/dpa/releases/tag/v1.0.0-rc3
 [1.0.0]: https://github.com/dpa-org/dpa/releases/tag/v1.0.0

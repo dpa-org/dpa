@@ -191,3 +191,66 @@ rather than to surface coverage.
 - `tests/api_contract.rs` pins the public shapes of the engine, registry,
   `ArgSpec`, `Op`, recipe handling, i18n, and `Flow`, so an accidental change
   fails in CI.
+
+## 10. Output metadata (`output_kind`)
+
+As part of the structured execution-result outlet (commit `e0bcca7`), every
+`Op` may declare a read-only `output_kind` describing the preferred structured
+view of its final result. It is metadata only: the execution pipeline never
+consults it, and `dpa op` / `dpa run` output is byte-for-byte unchanged.
+
+- **`bytes`** (default): raw pipeline bytes; the historical outlet.
+- **`utf8`**: the result is valid UTF-8 text.
+- **`json`**: the result is a JSON document (parsed to the shared
+  JSON-compatible DOM).
+- **`yaml`**: the result is a YAML document (parsed to the shared
+  JSON-compatible DOM, matching `dpa:yaml:to-json`).
+- **`hex`**: the result is hex-encoded text (validated by the shared codec hex
+  parser).
+
+Declarations come from the registration macro's `$out_kind` variant or from the
+central table `apply_output_kind_declarations` (examples: `hex:encode` -> Hex,
+`json:to-yaml` -> Yaml, `yaml:to-json` -> Json, `xml:to-json` -> Json,
+`json:pretty` / `json:minify` -> Json). `dpa list` / `dpa ops <name>` expose the
+declared kind; ops without a declaration read as `bytes`.
+
+The structured outlet `inspect` (see `src/api.rs`) resolves the conversion
+target in this order:
+
+1. explicit `output_kind` argument (overrides any declaration);
+2. the `output_kind` declared by the flow's final op;
+3. `Bytes` as the universal fallback for undeclared ops.
+
+`to_structured` converts raw pipeline bytes to the requested form; `Utf8`,
+`Json`, `Yaml` and `Hex` fail loudly on malformed content instead of
+substituting best-effort output. When adding a new op, prefer a declaration at
+the registration macro call site; keep the central table for cross-module
+declarations that cannot live there.
+
+## 11. Execution control (`timeout` / `cancel`)
+
+Hosts (GUI workbench, batch coordinator, desktop) can bound an engine run
+through `EngineConfig`:
+
+- **`timeout: Option<Duration>`** — wall-clock execution window. The clock
+  starts at the beginning of the execution call (not when the config is
+  built). When elapsed, the run fails with `ErrorCode::Timeout`
+  (`code: "TIMEOUT"`, `category: "run"`). `None` = no time limit.
+- **`cancel: Option<Arc<AtomicBool>>`** — shared cancellation flag. The caller
+  flips the flag (GUI cancel button / batch coordinator); the next checkpoint
+  fails the run with `ErrorCode::Cancelled` (`code: "CANCELLED"`,
+  `category: "run"`). `None` = uncancellable. Multiple runs may share one
+  flag.
+
+Both are **polled at execution checkpoints** — step boundaries in the
+whole-buffer path, input-chunk boundaries in the streaming paths (including
+the CLI stream loop) — never between bytes inside a single op. A single op
+that is CPU-bound for a long time is bounded by `timeout` only at its
+completion boundary; cancellation latency is therefore bounded by the longest
+single step, not by the whole flow.
+
+Both error codes follow the structured error contract from `src/error.rs`
+(`{code, category, message}`), and both render i18n messages
+(`err.timeout`, `err.cancelled`). `EngineConfig` equality deliberately ignores
+the `cancel` handle (settings that shape output compare equal; the flag is a
+runtime handle).

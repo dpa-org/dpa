@@ -4,9 +4,11 @@
 //! share the same engine. CLI and plugin host are excluded on wasm32 targets
 //! (Web/WASM: the wasm crate reuses engine/ops/i18n only).
 
-#[cfg(not(target_arch = "wasm32"))]
+pub mod api;
+#[cfg(all(not(target_arch = "wasm32"), feature = "cli"))]
 pub mod cli;
 pub mod engine;
+pub mod error;
 pub mod estimate;
 pub mod flow;
 pub mod i18n;

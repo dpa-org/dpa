@@ -69,14 +69,15 @@ The engine applies the following controls when processing untrusted input:
 
 ## Known dependency advisories
 
-Two upstream advisories affect crates in the dependency tree. They are tracked
-here for visibility.
+Three upstream advisories affect crates in the dependency tree. They are
+tracked here for visibility.
 
 | Advisory | Crate / version | Issue | Impact on dpa | Status |
 |---|---|---|---|---|
 | RUSTSEC-2023-0071 | rsa 0.9.10 | Marvin's attack: RSA timing side channel; no patched release available | **Audited, not reachable**: dpa's public-key ops only *verify* signatures — `pubkey.rs` never performs private-key operations (sign/decrypt); private key material is parsed for format inspection only, so the RSA private-key timing oracle this advisory describes cannot be triggered by dpa | Tracked, not fixed; registered in the cargo-deny ignore list with a decision reference |
 | RUSTSEC-2024-0449 | unsafe-libyaml 0.2.11 via serde_yaml 0.9.34+ (deprecated) | YAML parser issue; upstream archived without a fix | **Closed**: flow/recipe YAML parsing and serialization migrated to `serde-saphyr` 1.3.x (safe Rust with serde integration) through the single entry point `flow::from_yaml` (strict booleans, ordinary merge keys, duplicate keys rejected); `serde_yaml_ng` and `unsafe-libyaml` are removed from the dependency tree, so the advisory no longer applies | Resolved by migration |
+| RUSTSEC-2026-0543 | chrono 0.4.45 | The crate is marked unmaintained; no patched release exists | **Maintenance risk only**: no vulnerability is associated with this advisory. dpa uses chrono for date/time parsing, formatting and arithmetic in the local `datetime` operations | Registered in the cargo-deny ignore list; migration to `time` or `jiff` is tracked as a dedicated compatibility change |
 
-The `rsa` advisory remains open because no patched upstream release exists; the
-boundary audit above is re-evaluated on each release, and a fix is adopted as
-soon as the ecosystem provides one.
+The `rsa` and `chrono` advisories remain open because no patched upstream
+releases exist. The boundary and migration decisions above are re-evaluated on
+each release.

@@ -155,3 +155,51 @@ stream }`。`dpa list` 展示 Category / Family / Kind / Op / Description 五列
 - **必填校验**由各操作内部完成并返回本地化错误，引擎层不做强制。
 - `tests/api_contract.rs` 钉住 engine、registry、`ArgSpec`、`Op`、recipe、i18n 与
   `Flow` 的公共形状，意外改动会在 CI 中直接失败。
+
+## 10. 输出元数据（`output_kind`）
+
+作为结构化执行结果出口的一部分（提交 `e0bcca7`），每个 `Op` 可声明一个只读的
+`output_kind`，描述其最终结果的首选结构化视图。它只是元数据：执行流水线从不读取
+它，`dpa op` / `dpa run` 的输出逐字节不变。
+
+- **`bytes`**（默认）：原始流水线字节，即历史出口。
+- **`utf8`**：结果是合法 UTF-8 文本。
+- **`json`**：结果是 JSON 文档（解析为共享的 JSON 兼容 DOM）。
+- **`yaml`**：结果是 YAML 文档（解析为共享的 JSON 兼容 DOM，与
+  `dpa:yaml:to-json` 一致）。
+- **`hex`**：结果是 hex 编码文本（用共享 codec hex 解析器校验）。
+
+声明来自注册宏的 `$out_kind` 变体，或集中声明表 `apply_output_kind_declarations`
+（示例：`hex:encode` -> Hex、`json:to-yaml` -> Yaml、`yaml:to-json` -> Json、
+`xml:to-json` -> Json、`json:pretty` / `json:minify` -> Json）。`dpa list` /
+`dpa ops <名字>` 会展示已声明类型；未声明的 op 一律按 `bytes` 处理。
+
+结构化出口 `inspect`（见 `src/api.rs`）按以下顺序解析转换目标：
+
+1. 显式 `output_kind` 参数（覆盖任何声明）；
+2. flow 最后一步 op 声明的 `output_kind`；
+3. `Bytes` 作为未声明 op 的通用兜底。
+
+`to_structured` 把原始流水线字节转换为请求的形式；`Utf8`、`Json`、`Yaml`、`Hex`
+对畸形内容一律响亮报错，不做尽力而为的替代输出。新增 op 时，优先在注册宏调用处
+声明；集中声明表只放无法落在调用点的跨模块声明。
+
+## 11. 执行控制（`timeout` / `cancel`）
+
+宿主（GUI 工作台、批量协调器、桌面端）可通过 `EngineConfig` 为一次引擎执行设界：
+
+- **`timeout: Option<Duration>`** — 墙钟执行窗口。时钟从执行调用开始计时
+  （而非构建配置时）。窗口用尽后运行以 `ErrorCode::Timeout` 失败
+  （`code: "TIMEOUT"`，`category: "run"`）。`None` = 无时限。
+- **`cancel: Option<Arc<AtomicBool>>`** — 共享取消标志。调用方置位（GUI
+  取消按钮 / 批量协调器）；下一个检查点以 `ErrorCode::Cancelled` 失败
+  （`code: "CANCELLED"`，`category: "run"`）。`None` = 不可取消。
+  多个运行可共享同一个标志。
+
+两者都在**执行检查点**轮询——整缓冲路径的步骤边界、流式路径的输入分块边界
+（含 CLI 流读循环），绝不介入单个 op 内部逐字节。单个 CPU 密集 op 的超时
+只在完成边界生效；取消延迟的上界是单步最长耗时，而非整个 flow。
+
+两个错误码遵循 `src/error.rs` 的结构化错误契约（`{code, category, message}`），
+并渲染 i18n 文案（`err.timeout`、`err.cancelled`）。`EngineConfig` 的相等性
+比较刻意忽略 `cancel` 句柄（决定输出的配置相等；标志属运行时句柄）。

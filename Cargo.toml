@@ -34,65 +34,76 @@ name = "dpa"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-aes = "0.8"
+aes = "0.9"
 anyhow = "1"
 base64 = "0.23"
-cbc = { version = "0.1", features = ["alloc"] }
+cbc = { version = "0.2", features = ["alloc"] }
 ecb = { version = "0.2", features = ["alloc"] }
 flate2 = "1"
 hex = "0.4"
-hmac = "0.12"
-md-5 = "0.10"
-rand = "0.9"
+hmac = "0.13"
+md-5 = "0.11"
+rand = "0.10"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-serde-saphyr = "1"
-sha1 = "0.10"
-sha2 = "0.10"
+serde-saphyr = "2"
+sha1 = "0.11"
+sha2 = "0.11"
 
 # Python bindings: only compiled when the `python` feature is enabled.
 pyo3 = { version = "0.23", optional = true, features = ["abi3-py38", "extension-module"] }
 
 # op coverage: hash / crypto / codec / compress
-blake2 = "0.10"
-blowfish = "0.9"
+blake2 = "0.11"
+blowfish = "0.10"
 byteorder = "1"
-brotli = "8"
-des = "0.8"
-hkdf = "0.12"
+brotli = "9"
+des = "0.9"
+hkdf = "0.13"
 lzma-rs = "0.3"
-pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
-ripemd = "0.1"
-sha3 = "0.10"
-md4 = "0.10"
-sm3 = "0.4"
-sm4 = "0.4"
+pbkdf2 = { version = "0.13", default-features = false, features = ["hmac"] }
+ripemd = "0.2"
+sha3 = "0.12"
+shake = "0.1"
+md4 = "0.11"
+sm3 = "0.5"
+sm4 = "0.6"
 
 # pure-Rust xz/lzma container (lzma-rs above), whirlpool
-whirlpool = "0.10"
+whirlpool = "0.11"
 
 # NT Hash (built-in MD4), CSV<->JSON, DateTime ops
 csv = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "alloc"] }
 
 # YAML/XML conversion
-quick-xml = "0.41"
+quick-xml = "0.42"
 
 # generate family - prime (Miller-Rabin big integer)
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 
 [features]
 default = ["cli"]
-cli = []
+# `cli`: argument parser + shell completion generator + the Windows console
+# codepage hint. `main.rs` (the only consumer of windows-sys) is compiled only
+# when this feature is on, so GUI/embedding builds never pull it.
+cli = ["dep:clap", "dep:clap_complete", "dep:windows-sys"]
+# `desktop`: contract marker for GUI/embedding consumers. The desktop app links
+# the library with `features = ["desktop"]`, `default-features = false`; this
+# keeps the CLI argument parser out of the embedding graph and gives future
+# GUI-only dependencies a stable feature to attach to.
+desktop = []
 python = ["dep:pyo3"]
 
 # Web/WASM: CLI-only & host-only deps are excluded from wasm32 targets.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-clap = "4"
-# Shell completion generation (`dpa --generate-completion <shell>`).
-clap_complete = "4"
+# CLI interaction layer: optional so GUI/desktop builds (`desktop` feature,
+# or `--no-default-features`) do not compile the argument parser / shell
+# completion generator. Enabled via the `cli` feature (default).
+clap = { version = "4", optional = true }
+clap_complete = { version = "4", optional = true }
 libloading = "0.9"
 rayon = "1.10"
 walkdir = "2"
@@ -102,7 +113,7 @@ bzip2 = { version = "0.4" }
 # v1.0 public-key analysis domain (analysis-only: no encrypt/sign). Host-only:
 # rsa/p256/p384/k256 pull rand_core->getrandom which has no wasm32-unknown-unknown
 # backend, so the whole module is cfg-gated off for wasm (see src/ops/mod.rs).
-pem = "3"
+pem = "4"
 x509-parser = "0.18"
 rsa = { version = "0.9", features = ["std", "pem", "sha2"] }
 p256 = { version = "0.14", features = ["arithmetic", "ecdsa", "pkcs8"] }
@@ -117,19 +128,21 @@ sm2 = { version = "0.14", default-features = false, features = ["dsa", "pem", "p
 
 # wasm32-unknown-unknown: rand needs getrandom with the js backend.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 
-# Console codepage query for the one-time `chcp 65001` hint
-# (Win32 static FFI declarations only; the built binary stays dependency-free).
+# Console codepage query for the one-time `chcp 65001` hint. Optional: enabled
+# via the `cli` feature; `main.rs` is the only consumer and is itself built
+# only under `cli`. Win32 static FFI declarations only; the built binary stays
+# dependency-free.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+windows-sys = { version = "0.61", features = ["Win32_System_Console"], optional = true }
 
 [dev-dependencies]
 # N3: property tests for parser surfaces (pem/hex/base64/asn1/json round-trips
 # and no-panic), see tests/proptest_parsers.rs. cargo-fuzz deferred to post-v1.0 CI.
 proptest = "1"
 # Exp: serde-saphyr migration probe (tests/saphyr_probe.rs) - dev-only, not in release graph.
-serde-saphyr = "1"
+serde-saphyr = "2"
 
 [profile.release]
 opt-level = 3

@@ -8,9 +8,9 @@ use super::super::gcm;
 use super::super::{ArgSpec, Op, StreamingOp};
 use super::*;
 use crate::i18n;
-use ::aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
+use ::aes::cipher::{BlockCipherDecrypt, BlockCipherEncrypt, KeyInit};
 use ::aes::{Aes128, Aes192, Aes256, Block};
-use rand::RngCore;
+use rand::Rng;
 use std::collections::HashMap;
 pub fn ops() -> Vec<Op> {
     vec![
@@ -144,7 +144,7 @@ pub(crate) enum AesBlock {
 
 impl AesBlock {
     fn encrypt_block(&self, block: &mut [u8; 16]) {
-        let mut b = Block::clone_from_slice(block);
+        let mut b = Block::try_from(&block[..]).expect("invalid block length");
         match self {
             Self::A128(c) => c.encrypt_block(&mut b),
             Self::A192(c) => c.encrypt_block(&mut b),
@@ -154,7 +154,7 @@ impl AesBlock {
     }
 
     fn decrypt_block(&self, block: &mut [u8; 16]) {
-        let mut b = Block::clone_from_slice(block);
+        let mut b = Block::try_from(&block[..]).expect("invalid block length");
         match self {
             Self::A128(c) => c.decrypt_block(&mut b),
             Self::A192(c) => c.decrypt_block(&mut b),
@@ -277,11 +277,11 @@ pub(crate) fn aes_block_crypt(
 
 /// GCM encrypt IV + output-layout decision.
 ///
-/// - explicit `iv` → use it; output stays `ct || tag` (classic layout, so NIST
+/// - explicit `iv` -> use it; output stays `ct || tag` (classic layout, so NIST
 ///   vectors and interop with other tools remain unchanged);
-/// - no `iv` (default) → random 12-byte IV; output becomes `iv || ct || tag`
+/// - no `iv` (default) -> random 12-byte IV; output becomes `iv || ct || tag`
 ///   so the decrypt side can auto-split it;
-/// - no `iv` + `zero-iv-ok` → deterministic 12 zero bytes; output stays
+/// - no `iv` + `zero-iv-ok` -> deterministic 12 zero bytes; output stays
 ///   `ct || tag` (INSECURE escape hatch for legacy scripts / reproducibility).
 ///
 /// Returns `(iv, prefix)` where `prefix` means "prepend iv to the output".
@@ -303,9 +303,9 @@ pub(crate) fn gcm_encrypt_iv(args: &HashMap<String, String>) -> anyhow::Result<(
 
 /// GCM decrypt input layout + optional `tag` cross-check.
 ///
-/// - explicit `iv` → input is `ct || tag` (trailing 16 bytes = tag);
-/// - no `iv` (default) → input is `iv || ct || tag`, auto-split;
-/// - no `iv` + `zero-iv-ok` → input is `ct || tag` with a 12-zero IV.
+/// - explicit `iv` -> input is `ct || tag` (trailing 16 bytes = tag);
+/// - no `iv` (default) -> input is `iv || ct || tag`, auto-split;
+/// - no `iv` + `zero-iv-ok` -> input is `ct || tag` with a 12-zero IV.
 ///
 /// A provided `tag` argument is cross-checked against the trailing tag (legacy
 /// scripts keep working); it is no longer required.
@@ -316,7 +316,7 @@ pub(crate) fn gcm_split_decrypt_input(
     let iv: Vec<u8>;
     let ct: &[u8];
     let tag: [u8; 16];
-    // Legacy layout: explicit iv + tag argument → input is ct only, tag from args.
+    // Legacy layout: explicit iv + tag argument -> input is ct only, tag from args.
     let legacy_tag: Option<[u8; 16]> = if let Some(t) = args.get("tag") {
         let t = parse_key(t)?;
         if t.len() != gcm::GCM_TAG_LEN {

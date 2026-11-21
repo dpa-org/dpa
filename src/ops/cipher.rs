@@ -13,18 +13,17 @@ use super::gcm::{self, GcmBlock};
 use super::{ArgSpec, Op, StreamingOp};
 use crate::i18n;
 
-// SM4 re-exports cipher 0.3 traits under sm4::cipher (not compatible with the
-// cipher 0.4 traits used by aes/des below; keep the two worlds separate).
+// SM4 / DES both re-export cipher 0.5 traits (same new stack as aes).
 use sm4::Sm4;
 use sm4::cipher::{
-    Block as Sm4Block, BlockDecrypt as Sm4BlockDecrypt, BlockEncrypt as Sm4BlockEncrypt,
-    NewBlockCipher,
+    Block as Sm4Block, BlockCipherDecrypt as Sm4BlockDecrypt,
+    BlockCipherEncrypt as Sm4BlockEncrypt, KeyInit,
 };
 
-// DES uses cipher 0.4.
+// DES uses cipher 0.5.
 use des::Des;
 use des::cipher::{
-    Block as DesBlock, BlockDecrypt as DesBlockDecrypt, BlockEncrypt as DesBlockEncrypt, KeyInit,
+    Block as DesBlock, BlockCipherDecrypt as DesBlockDecrypt, BlockCipherEncrypt as DesBlockEncrypt,
 };
 
 pub fn ops() -> Vec<Op> {
@@ -290,13 +289,13 @@ impl BlockCipherOps for Sm4 {
     const BLOCK: usize = 16;
 
     fn encrypt(&self, blk: &mut [u8]) {
-        let mut b = Sm4Block::<Sm4>::clone_from_slice(blk);
+        let mut b = Sm4Block::<Sm4>::try_from(&*blk).expect("invalid block length");
         Sm4BlockEncrypt::encrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }
 
     fn decrypt(&self, blk: &mut [u8]) {
-        let mut b = Sm4Block::<Sm4>::clone_from_slice(blk);
+        let mut b = Sm4Block::<Sm4>::try_from(&*blk).expect("invalid block length");
         Sm4BlockDecrypt::decrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }
@@ -304,7 +303,7 @@ impl BlockCipherOps for Sm4 {
 
 impl GcmBlock for Sm4 {
     fn encrypt_block(&self, blk: &mut [u8; 16]) {
-        let mut b = Sm4Block::<Sm4>::clone_from_slice(blk);
+        let mut b = Sm4Block::<Sm4>::try_from(&blk[..]).expect("invalid block length");
         Sm4BlockEncrypt::encrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }
@@ -314,13 +313,13 @@ impl BlockCipherOps for Des {
     const BLOCK: usize = 8;
 
     fn encrypt(&self, blk: &mut [u8]) {
-        let mut b = DesBlock::<Des>::clone_from_slice(blk);
+        let mut b = DesBlock::<Des>::try_from(&*blk).expect("invalid block length");
         DesBlockEncrypt::encrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }
 
     fn decrypt(&self, blk: &mut [u8]) {
-        let mut b = DesBlock::<Des>::clone_from_slice(blk);
+        let mut b = DesBlock::<Des>::try_from(&*blk).expect("invalid block length");
         DesBlockDecrypt::decrypt_block(self, &mut b);
         blk.copy_from_slice(&b);
     }
@@ -884,7 +883,7 @@ fn sm4_cmac(input: &[u8], args: &HashMap<String, String>) -> anyhow::Result<Vec<
     let cipher = Sm4::new_from_slice(&key)
         .map_err(|_| anyhow::anyhow!("{}", i18n::tf("err.sm4_init", &["invalid key material"])))?;
     let mut enc = |b: &mut [u8; 16]| {
-        cipher.encrypt(Sm4Block::<Sm4>::from_mut_slice(b));
+        cipher.encrypt(b);
     };
     Ok(cmac_128(&mut enc, input).to_vec())
 }
@@ -1225,15 +1224,14 @@ mod tests {
     #[test]
     fn cmac_128_matches_rfc4493_aes_vectors() {
         // Validate the generic CMAC construction against the published RFC
-        // 4493 §4 AES-CMAC test vectors (AES-128 as the block cipher).
+        // 4493 section 4 AES-CMAC test vectors (AES-128 as the block cipher).
         use aes::Aes128;
-        use aes::cipher::generic_array::GenericArray;
-        use aes::cipher::{BlockEncrypt as _, KeyInit as _};
+        use aes::cipher::{BlockCipherEncrypt as _, KeyInit as _};
 
         let key = hex::decode("2b7e151628aed2a6abf7158809cf4f3c").unwrap();
         let aes = Aes128::new_from_slice(&key).unwrap();
         let mut enc = |b: &mut [u8; 16]| {
-            aes.encrypt_block(GenericArray::from_mut_slice(b));
+            aes.encrypt_block(b.into());
         };
         let vectors: &[(&str, &str)] = &[
             ("", "bb1d6929e95937287fa37d129b756746"),

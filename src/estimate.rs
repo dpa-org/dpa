@@ -1,12 +1,12 @@
 //! Static output-size estimation for flow steps (`--explain`).
 //!
-//! `dpa run --explain` prints a per-step input→output estimate before
+//! `dpa run --explain` prints a per-step input->output estimate before
 //! execution, so users can spot runaway inflations *before* the dynamic
 //! `--max-step-output-bytes` cap trips mid-run. Estimation is deliberately
 //! conservative and advisory-only:
 //!
 //! - fixed-length families (hash / uuid / random) return exact sizes;
-//! - codec families return a constant ratio (hex ×2, base64 ×4/3, ...);
+//! - codec families return a constant ratio (hex x2, base64 x4/3, ...);
 //! - content-dependent ops (analyze / extract / transform / compress ...)
 //!   return [`StaticEstimate::Unknown`] and the explain table prints "?"
 //!   instead of inventing a number.
@@ -24,7 +24,7 @@ use crate::ops::Op;
 pub enum StaticEstimate {
     /// Fixed byte count regardless of input size.
     Fixed(usize),
-    /// Output ≈ input × num / den (rounded down; shown with a `~` prefix).
+    /// Output ~= input x num / den (rounded down; shown with a `~` prefix).
     Scale { num: u64, den: u64 },
     /// Content-dependent: cannot be estimated without running the op.
     Unknown,

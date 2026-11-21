@@ -201,6 +201,8 @@ err.step_failed = 第 {} 步（{}）执行失败: {}
 err.stream_failed = 流式处理失败: {}
 err.stream_finished = 流已结束，不能再写入
 err.stream_read_failed = 流式读取输入失败: {}
+err.cancelled = 执行已被调用方取消
+err.timeout = 执行超过 {} 毫秒超时窗口
 err.system_time = 系统时间异常: {}
 err.tea_key_len = TEA 系列密钥长度须为 16 字节，当前 {}
 err.tea_block_misaligned = TEA 输入长度未对齐 8 字节块；请用 padding=pkcs7 或 none
@@ -450,3 +452,6 @@ explain.step = 第 {} 步（{}）：{} -> {}
 explain.out_unknown = 未知
 explain.out_fixed = {} 字节
 explain.out_ratio = 约 {} 字节（比例 {} / {}）
+err.yaml_parse = YAML 解析失败: {}
+err.output_not_utf8 = 结构化视图失败：输出不是有效的 UTF-8
+msg.op_output_kind = 输出形态: {}

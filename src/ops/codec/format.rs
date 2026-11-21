@@ -45,12 +45,12 @@ pub(crate) fn xml_to_json(
             Err(e) => anyhow::bail!("{}", e),
             Ok(Event::Eof) => break,
             Ok(Event::Start(e)) => {
-                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                let name = e.name().as_ref().to_string();
                 let mut m = Map::new();
                 for a in e.attributes() {
                     let a = a.map_err(|e| anyhow::anyhow!("{}", e))?;
-                    let key = format!("@{}", String::from_utf8_lossy(a.key.as_ref()));
-                    let val = String::from_utf8_lossy(&a.value).to_string();
+                    let key = format!("@{}", a.key.as_ref());
+                    let val = a.value.into_owned();
                     m.insert(key, Value::String(val));
                 }
                 stack.push((name, m));
@@ -91,11 +91,9 @@ pub(crate) fn xml_to_json(
                 }
             }
             Ok(Event::Text(e)) => {
-                let txt = quick_xml::escape::unescape(
-                    std::str::from_utf8(&e).map_err(|err| anyhow::anyhow!("{err}"))?,
-                )
-                .map_err(|err| anyhow::anyhow!("{err}"))?
-                .into_owned();
+                let txt = quick_xml::escape::unescape(e.as_ref())
+                    .map_err(|err| anyhow::anyhow!("{err}"))?
+                    .into_owned();
                 if let Some((_, m)) = stack.last_mut()
                     && !txt.is_empty()
                 {
@@ -109,7 +107,7 @@ pub(crate) fn xml_to_json(
             }
             Ok(Event::CData(e)) => {
                 if let Some((_, m)) = stack.last_mut() {
-                    let txt = String::from_utf8_lossy(&e).to_string();
+                    let txt = e.as_ref().to_string();
                     if !txt.is_empty() {
                         match m.get_mut("#text") {
                             Some(Value::String(s)) => s.push_str(&txt),

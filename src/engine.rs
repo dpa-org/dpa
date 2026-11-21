@@ -41,7 +41,11 @@ pub const DEFAULT_MAX_STEP_OUTPUT_BYTES: usize = 64 << 20;
 /// cross-call state; default behaviour is identical to the old globals'
 /// initial values. Multiple engines with different settings can now run
 /// side by side (multi-instance / wasm / cdylib paths unaffected).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Execution control: `timeout` and `cancel` are polled at step and chunk
+/// checkpoints; `None` keeps the legacy behaviour (no time limit and no
+/// cancellation).
+#[derive(Debug, Clone)]
 pub struct EngineConfig {
     max_input_bytes: usize,
     max_step_output_bytes: usize,
@@ -60,8 +64,36 @@ pub struct EngineConfig {
     /// preserves the legacy behavior where any environment variable may be
     /// read; `Some(names)` restricts `env:`-sourced arguments to that exact
     /// set, so a malicious flow cannot exfiltrate arbitrary variables.
+    /// A `Some(empty)` set rejects **all** `env:` reads (true empty
+    /// whitelist; desktop uses it to statically block every `env:` arg).
     allow_env: Option<std::collections::HashSet<String>>,
+    /// Optional wall-clock execution window. Polled at execution
+    /// checkpoints; when exceeded the run fails with `ErrorCode::Timeout`.
+    /// `None` (default) = no time limit.
+    timeout: Option<std::time::Duration>,
+    /// Optional cancellation flag shared with the caller (GUI cancel
+    /// button / batch coordinator). Polled at execution checkpoints; when
+    /// set the run fails with `ErrorCode::Cancelled`. `None` = uncancellable.
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
+
+// `cancel` carries an `Arc<AtomicBool>` which is not `PartialEq`/`Eq`-able;
+// equality compares the engine settings that shape output, ignoring the
+// cancellation handle (two configs with different cancel flags but identical
+// limits are equivalent for equality purposes).
+impl PartialEq for EngineConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.max_input_bytes == other.max_input_bytes
+            && self.max_step_output_bytes == other.max_step_output_bytes
+            && self.verbose == other.verbose
+            && self.batch_separator == other.batch_separator
+            && self.batch_label == other.batch_label
+            && self.allow_env == other.allow_env
+            && self.timeout == other.timeout
+    }
+}
+
+impl Eq for EngineConfig {}
 
 impl Default for EngineConfig {
     fn default() -> Self {
@@ -72,6 +104,8 @@ impl Default for EngineConfig {
             batch_separator: None,
             batch_label: false,
             allow_env: None,
+            timeout: None,
+            cancel: None,
         }
     }
 }
@@ -111,14 +145,16 @@ impl EngineConfig {
     }
 
     /// Builder that sets the `env:` variable whitelist.
-    /// Replaces any previously configured set.
+    /// Replaces any previously configured set. An **empty** set rejects every
+    /// `env:` read (true empty whitelist), matching the desktop GUI's static
+    /// block-all policy; pass `None` for the legacy allow-any behavior.
     pub fn with_allow_env(mut self, names: std::collections::HashSet<String>) -> Self {
-        self.allow_env = if names.is_empty() { None } else { Some(names) };
+        self.allow_env = Some(names);
         self
     }
 
     /// Effective `env:` whitelist (`None` = any variable may be
-    /// read, legacy behavior).
+    /// read, legacy behavior; `Some(empty)` = all `env:` reads rejected).
     pub fn allow_env(&self) -> Option<&std::collections::HashSet<String>> {
         self.allow_env.as_ref()
     }
@@ -150,6 +186,61 @@ impl EngineConfig {
         self.batch_label = on;
         self
     }
+
+    /// Optional wall-clock execution window (`None` = no time limit).
+    pub fn timeout(&self) -> Option<std::time::Duration> {
+        self.timeout
+    }
+
+    /// Builder: set the optional wall-clock execution window.
+    /// `None` (default) removes the limit; a finite duration makes every
+    /// execution checkpoint fail with `ErrorCode::Timeout` once elapsed.
+    /// The clock starts at the beginning of the execution call, not when the
+    /// config is built.
+    pub fn with_timeout(mut self, d: Option<std::time::Duration>) -> Self {
+        self.timeout = d;
+        self
+    }
+
+    /// Cancellation flag handle (`None` = uncancellable run).
+    pub fn cancel(&self) -> Option<&std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        self.cancel.as_ref()
+    }
+
+    /// Builder: attach a shared cancellation flag. The caller sets the flag
+    /// (e.g. from a GUI cancel button / batch coordinator); execution
+    /// checkpoints then fail with `ErrorCode::Cancelled`. Multiple runs can
+    /// share one flag.
+    pub fn with_cancel(
+        mut self,
+        flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    ) -> Self {
+        self.cancel = flag;
+        self
+    }
+}
+
+/// Poll the execution-control checkpoints: cancellation flag first, then the
+/// wall-clock timeout window. Called at step / chunk boundaries so long
+/// pipelines become interruptible without intrusive per-op hooks.
+fn check_abort(cfg: &EngineConfig, started: std::time::Instant) -> anyhow::Result<()> {
+    if let Some(flag) = cfg.cancel()
+        && flag.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        return Err(crate::error::coded(
+            crate::error::ErrorCode::Cancelled,
+            i18n::t("err.cancelled"),
+        ));
+    }
+    if let Some(d) = cfg.timeout()
+        && started.elapsed() >= d
+    {
+        return Err(crate::error::coded(
+            crate::error::ErrorCode::Timeout,
+            i18n::tf("err.timeout", &[d.as_millis().to_string().as_str()]),
+        ));
+    }
+    Ok(())
 }
 
 /// Flow-control op: Fork. The engine intercepts it in
@@ -402,7 +493,7 @@ pub fn run_flow_yaml(
 
     let expanded = expand_inputs(inputs, recursive)?;
 
-    // `--explain` prints a static per-step input→output estimate before
+    // `--explain` prints a static per-step input->output estimate before
     // execution (advisory only; never changes behaviour or the dynamic cap).
     if explain {
         print_flow_explain(&flow, input_size_hint(&expanded))?;
@@ -433,7 +524,7 @@ fn input_size_hint(expanded: &[InputSpec]) -> Option<usize> {
     }
 }
 
-/// `--explain`: print a static per-step input→output estimate before
+/// `--explain`: print a static per-step input->output estimate before
 /// execution. Goes to stderr so the stdout data stream stays clean.
 fn print_flow_explain(flow: &Flow, input_len: Option<usize>) -> anyhow::Result<()> {
     for line in render_flow_explain(flow, input_len)?.lines() {
@@ -959,8 +1050,13 @@ fn process_bytes_depth(
     }
     let mut current = data.to_vec();
 
+    // Execution-control checkpoint: timeout / cancellation are polled at
+    // every step boundary (and inside Fork recursion via each sub-call).
+    let started = std::time::Instant::now();
+
     let mut idx = 0;
     while idx < flow.steps.len() {
+        check_abort(cfg, started)?;
         let step = &flow.steps[idx];
         if step.op == FORK_OP {
             // Fork: split on the separator, run every remaining step on each
@@ -1310,10 +1406,14 @@ pub fn process_bytes_stream(
         // steps); fall back to the in-memory path, which is the canonical one.
         return process_bytes(flow, data, fmt, cfg);
     }
+    // Execution-control checkpoint: timeout / cancellation are polled at
+    // every input-chunk boundary so a slow chain stays interruptible.
+    let started = std::time::Instant::now();
     let mut handlers = build_handlers(flow, cfg)?;
     let mut stats: Vec<StepStat> = (0..handlers.len()).map(|_| StepStat::new()).collect();
     let mut acc = Vec::new();
     for chunk in data.chunks(IO_BUF) {
+        check_abort(cfg, started)?;
         let mut cur: &[u8] = chunk;
         let mut produced;
         for (hi, h) in handlers.iter_mut().enumerate() {
@@ -1409,6 +1509,9 @@ fn process_stream_to(
             )
         });
     }
+    // Execution-control checkpoint: timeout / cancellation are polled at
+    // every read-chunk boundary (CLI stream path).
+    let started = std::time::Instant::now();
     let mut handlers = build_handlers(flow, cfg)?;
     let mut stats: Vec<StepStat> = (0..handlers.len()).map(|_| StepStat::new()).collect();
 
@@ -1419,6 +1522,7 @@ fn process_stream_to(
     // newline is added only when the rendered chain does not end with one.
     let mut last_byte: Option<u8> = None;
     loop {
+        check_abort(cfg, started)?;
         let n = reader.read(&mut buf).map_err(|e| {
             anyhow::anyhow!(
                 "{}",
@@ -2786,7 +2890,7 @@ mod tests {
     }
 
     /// `--explain` renders one localized heading plus a per-step
-    /// input→output estimate; content-dependent steps are marked unknown and
+    /// input->output estimate; content-dependent steps are marked unknown and
     /// are never fabricated into a number.
     #[test]
     fn explain_renders_step_estimates() {

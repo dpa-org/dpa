@@ -89,6 +89,12 @@ $ dpa run flow.yaml input.hex
 - **Recipe 转换**：`dpa recipe convert` 读写 CyberChef 的 recipe 格式（URL、CHEF、
   JSON），便于把已有 recipe 转成流程。
 - **Python 绑定**（可选 `python` feature）：`import dpa` 后在内存中运行流程。
+- **宿主执行控制**：`EngineConfig.timeout` 与 `EngineConfig.cancel` 在步骤 /
+  分块检查点为任意流程设界；宿主获得结构化 `TIMEOUT` / `CANCELLED` 错误，
+  并可通过公开 `run_batch` API 跑批量（`jobs` 并行、单项失败隔离）。
+- **`desktop` feature**：GUI / 桌面端消费者可通过
+  `--no-default-features --features desktop` 链接引擎，不编译 CLI 参数解析 /
+  shell 补全层。
 - **消息本地化**：面向用户的文本（错误、CLI 帮助、列表输出）提供英文（默认）与
   简体中文（`--lang zh-CN` 或 `DPA_LANG=zh`）。
 - **单一二进制**，无运行时依赖。
@@ -274,8 +280,46 @@ steps:
 print(out)  # b"68656c6c6f"
 ```
 
-模块导出 `run`、`run_batch`、`run_file`、`list_ops` 与 `op`。批量与文件入口见
-[examples/python_demo.py](examples/python_demo.py)。
+模块导出 `run`、`run_batch`、`run_file`、`list_ops`、`op`、`run_op` 与
+`inspect`。
+
+### 单操作执行：`run_op`
+
+```python
+r = dpa.run_op("dpa:hex:encode", args={"delimiter": "colon"}, data=b"abc")
+print(r)  # b"61:62:63"
+```
+
+`run_op(name, args=None, data=b"")` 构造单步 flow 并走与 `dpa run` 相同的引擎，
+返回原始流水线字节。`data` 接受 `str`（按 UTF-8 编码）或 `bytes`；`args` 是可选
+的字符串参数 `dict`。
+
+### 结构化视图：`inspect`
+
+```python
+# 最后一步声明了 output_kind，inspect 按声明解析流水线字节
+# （dpa:json:to-yaml 声明 yaml -> Python dict）
+v = dpa.inspect("""
+steps:
+  - op: dpa:json:to-yaml
+""", data=b'{"a":1,"b":[1,2]}')
+print(v)  # {'a': 1, 'b': [1, 2]}
+
+# 显式 output_kind 覆盖声明
+h = dpa.inspect("steps:\n  - op: dpa:hex:encode\n", data=b"\x01\x02",
+                output_kind="utf8")
+print(h)  # '0102'
+
+# 未声明的 op 回退为原始字节
+b = dpa.inspect("steps:\n  - op: dpa:reverse\n", data=b"abc")
+print(b)  # b'cba'
+```
+
+`inspect(flow_yaml, data=b"", output_kind=None)` 让 flow 走字节流水线并把最终结果
+转为结构化值。转换目标按以下顺序解析：显式 `output_kind` 参数 -> 最后一步 op
+声明的 `output_kind` -> `bytes` 兜底。支持 `bytes`、`utf8`、`json`、`yaml`、`hex`
+五种；`json` / `yaml` 返回 Python `dict` / `list`，`hex` 用共享 hex 解析器校验文本
+（见 [OPERATION_CONTRACT.zh-CN.md](OPERATION_CONTRACT.zh-CN.md)）。
 
 ## 文档
 
@@ -366,7 +410,7 @@ print(out)  # b"68656c6c6f"
 从 git 检出构建时，`dpa --version` 会输出包版本、构建所用的 git 提交与提交日期：
 
 ```
-dpa 1.0.0 (commit 66d05b838b01, 2026-10-25)
+dpa 1.0.0 (commit <short-sha>, YYYY-MM-DD)
 ```
 
 - 没有 `.git` 目录的源码（如发布 tarball）退化为仅显示版本号。
@@ -387,7 +431,7 @@ dpa 1.0.0 (commit 66d05b838b01, 2026-10-25)
 
 ## 路线图
 
-`1.0.0` 是首个公开发布。从此 flow 格式、操作标识与 CLI 面视为稳定；见
+`1.0.0` 是首个稳定版本。从该版本起，flow 格式、操作标识与 CLI 面视为稳定；见
 [OPERATION_CONTRACT.md](OPERATION_CONTRACT.md)。
 
 - **1.x**：只做加法——新增操作、新增可选参数、新增输出形态与性能优化。改变流程文件

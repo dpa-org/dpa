@@ -3,7 +3,7 @@
 use super::super::{ArgSpec, Op, StreamingOp};
 use super::*;
 use crate::i18n;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
 use sha3::{Sha3_256, Sha3_512};
@@ -149,11 +149,67 @@ impl StreamingOp for HmacStream {
     }
 }
 
+/// SHA3-based HMAC (streaming-compatible wrapper). The hmac crate cannot wrap
+/// SHA3 in the digest 0.11 stack (SHA3 is sponge-based and provides no
+/// block-api CoreProxy), so the standard two-pass HMAC construction is
+/// implemented directly. Streaming is emulated by buffering the input; the op
+/// contract only requires correct final output.
+struct HmacSha3Stream {
+    ipad: Vec<u8>,
+    opad: Vec<u8>,
+    data: Vec<u8>,
+    hash: fn(&[u8]) -> Vec<u8>,
+}
+
+fn sha3_256_digest(data: &[u8]) -> Vec<u8> {
+    let mut h = Sha3_256::default();
+    sha3::digest::Update::update(&mut h, data);
+    sha3::digest::Digest::finalize(h).to_vec()
+}
+
+fn sha3_512_digest(data: &[u8]) -> Vec<u8> {
+    let mut h = Sha3_512::default();
+    sha3::digest::Update::update(&mut h, data);
+    sha3::digest::Digest::finalize(h).to_vec()
+}
+
+/// Build the HMAC inner/outer pad states for a SHA3 instance (block size is
+/// the sponge rate: 136 bytes for SHA3-256, 72 bytes for SHA3-512).
+fn hmac_sha3_state(
+    block_size: usize,
+    hash: fn(&[u8]) -> Vec<u8>,
+    key: &[u8],
+) -> (Vec<u8>, Vec<u8>) {
+    let mut k = if key.len() > block_size {
+        hash(key)
+    } else {
+        key.to_vec()
+    };
+    k.resize(block_size, 0);
+    let ipad = k.iter().map(|&b| b ^ 0x36).collect();
+    let opad = k.iter().map(|&b| b ^ 0x5c).collect();
+    (ipad, opad)
+}
+
+impl MacDyn for HmacSha3Stream {
+    fn update(&mut self, data: &[u8]) {
+        self.data.extend_from_slice(data);
+    }
+    fn finalize_bytes(&mut self) -> Vec<u8> {
+        let mut inner = self.ipad.clone();
+        inner.extend_from_slice(&self.data);
+        let ih = (self.hash)(&inner);
+        let mut outer = self.opad.clone();
+        outer.extend_from_slice(&ih);
+        (self.hash)(&outer)
+    }
+}
+
 pub(crate) fn make_hmac(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
     let key = require_key(args)?;
     let algo = opt_arg(args, "algo", "sha256");
     let mac: Box<dyn MacDyn> = match algo {
-        "sha1" => Box::new(MacWrap(<Hmac<Sha1> as Mac>::new_from_slice(&key).map_err(
+        "sha1" => Box::new(MacWrap(Hmac::<Sha1>::new_from_slice(&key).map_err(
             |e| {
                 anyhow::anyhow!(
                     "{}",
@@ -161,46 +217,46 @@ pub(crate) fn make_hmac(args: &HashMap<String, String>) -> anyhow::Result<Box<dy
                 )
             },
         )?)),
-        "sha256" => Box::new(MacWrap(
-            <Hmac<Sha256> as Mac>::new_from_slice(&key).map_err(|e| {
+        "sha256" => Box::new(MacWrap(Hmac::<Sha256>::new_from_slice(&key).map_err(
+            |e| {
                 anyhow::anyhow!(
                     "{}",
                     i18n::tf("err.hmac_sha256_init", &[e.to_string().as_str()])
                 )
-            })?,
-        )),
-        "sha512" => Box::new(MacWrap(
-            <Hmac<Sha512> as Mac>::new_from_slice(&key).map_err(|e| {
+            },
+        )?)),
+        "sha512" => Box::new(MacWrap(Hmac::<Sha512>::new_from_slice(&key).map_err(
+            |e| {
                 anyhow::anyhow!(
                     "{}",
                     i18n::tf("err.hmac_sha512_init", &[e.to_string().as_str()])
                 )
-            })?,
-        )),
-        "sm3" => Box::new(MacWrap(<Hmac<Sm3> as Mac>::new_from_slice(&key).map_err(
-            |e| {
-                anyhow::anyhow!(
-                    "{}",
-                    i18n::tf("err.hmac_sm3_init", &[e.to_string().as_str()])
-                )
             },
         )?)),
-        "sha3-256" => Box::new(MacWrap(
-            <Hmac<Sha3_256> as Mac>::new_from_slice(&key).map_err(|e| {
-                anyhow::anyhow!(
-                    "{}",
-                    i18n::tf("err.hmac_sha3_256_init", &[e.to_string().as_str()])
-                )
-            })?,
-        )),
-        "sha3-512" => Box::new(MacWrap(
-            <Hmac<Sha3_512> as Mac>::new_from_slice(&key).map_err(|e| {
-                anyhow::anyhow!(
-                    "{}",
-                    i18n::tf("err.hmac_sha3_512_init", &[e.to_string().as_str()])
-                )
-            })?,
-        )),
+        "sm3" => Box::new(MacWrap(Hmac::<Sm3>::new_from_slice(&key).map_err(|e| {
+            anyhow::anyhow!(
+                "{}",
+                i18n::tf("err.hmac_sm3_init", &[e.to_string().as_str()])
+            )
+        })?)),
+        "sha3-256" => {
+            let (ipad, opad) = hmac_sha3_state(136, sha3_256_digest, &key);
+            Box::new(HmacSha3Stream {
+                ipad,
+                opad,
+                data: Vec::new(),
+                hash: sha3_256_digest,
+            })
+        }
+        "sha3-512" => {
+            let (ipad, opad) = hmac_sha3_state(72, sha3_512_digest, &key);
+            Box::new(HmacSha3Stream {
+                ipad,
+                opad,
+                data: Vec::new(),
+                hash: sha3_512_digest,
+            })
+        }
         other => anyhow::bail!(
             "{}",
             i18n::tf(
@@ -216,7 +272,7 @@ pub(crate) fn hmac(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
     let key = require_key(args)?;
     let algo = opt_arg(args, "algo", "sha256");
     match algo {
-        "sha1" => Ok(<Hmac<Sha1> as Mac>::new_from_slice(&key)
+        "sha1" => Ok(Hmac::<Sha1>::new_from_slice(&key)
             .map_err(|e| {
                 anyhow::anyhow!(
                     "{}",
@@ -227,7 +283,7 @@ pub(crate) fn hmac(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
             .finalize()
             .into_bytes()
             .to_vec()),
-        "sha256" => Ok(<Hmac<Sha256> as Mac>::new_from_slice(&key)
+        "sha256" => Ok(Hmac::<Sha256>::new_from_slice(&key)
             .map_err(|e| {
                 anyhow::anyhow!(
                     "{}",
@@ -238,7 +294,7 @@ pub(crate) fn hmac(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
             .finalize()
             .into_bytes()
             .to_vec()),
-        "sha512" => Ok(<Hmac<Sha512> as Mac>::new_from_slice(&key)
+        "sha512" => Ok(Hmac::<Sha512>::new_from_slice(&key)
             .map_err(|e| {
                 anyhow::anyhow!(
                     "{}",
@@ -249,7 +305,7 @@ pub(crate) fn hmac(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
             .finalize()
             .into_bytes()
             .to_vec()),
-        "sm3" => Ok(<Hmac<Sm3> as Mac>::new_from_slice(&key)
+        "sm3" => Ok(Hmac::<Sm3>::new_from_slice(&key)
             .map_err(|e| {
                 anyhow::anyhow!(
                     "{}",
@@ -260,28 +316,24 @@ pub(crate) fn hmac(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
             .finalize()
             .into_bytes()
             .to_vec()),
-        "sha3-256" => Ok(<Hmac<Sha3_256> as Mac>::new_from_slice(&key)
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "{}",
-                    i18n::tf("err.hmac_sha3_256_init", &[e.to_string().as_str()])
-                )
-            })?
-            .chain_update(input)
-            .finalize()
-            .into_bytes()
-            .to_vec()),
-        "sha3-512" => Ok(<Hmac<Sha3_512> as Mac>::new_from_slice(&key)
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "{}",
-                    i18n::tf("err.hmac_sha3_512_init", &[e.to_string().as_str()])
-                )
-            })?
-            .chain_update(input)
-            .finalize()
-            .into_bytes()
-            .to_vec()),
+        "sha3-256" => {
+            let (ipad, opad) = hmac_sha3_state(136, sha3_256_digest, &key);
+            let mut inner = ipad;
+            inner.extend_from_slice(input);
+            let ih = sha3_256_digest(&inner);
+            let mut outer = opad;
+            outer.extend_from_slice(&ih);
+            Ok(sha3_256_digest(&outer))
+        }
+        "sha3-512" => {
+            let (ipad, opad) = hmac_sha3_state(72, sha3_512_digest, &key);
+            let mut inner = ipad;
+            inner.extend_from_slice(input);
+            let ih = sha3_512_digest(&inner);
+            let mut outer = opad;
+            outer.extend_from_slice(&ih);
+            Ok(sha3_512_digest(&outer))
+        }
         other => anyhow::bail!(
             "{}",
             i18n::tf(
@@ -297,7 +349,7 @@ pub(crate) fn hmac(input: &[u8], args: &HashMap<String, String>) -> anyhow::Resu
 pub(crate) fn hmac_bytes(hash: &str, key: &[u8], data: &[u8]) -> anyhow::Result<Vec<u8>> {
     macro_rules! do_hmac {
         ($t:ty) => {{
-            let mut m = <$t as Mac>::new_from_slice(key)?;
+            let mut m = <$t>::new_from_slice(key)?;
             m.update(data);
             Ok(m.finalize().into_bytes().to_vec())
         }};
@@ -307,8 +359,24 @@ pub(crate) fn hmac_bytes(hash: &str, key: &[u8], data: &[u8]) -> anyhow::Result<
         "sha256" => do_hmac!(Hmac<Sha256>),
         "sha512" => do_hmac!(Hmac<Sha512>),
         "sm3" => do_hmac!(Hmac<Sm3>),
-        "sha3-256" => do_hmac!(Hmac<Sha3_256>),
-        "sha3-512" => do_hmac!(Hmac<Sha3_512>),
+        "sha3-256" => {
+            let (ipad, opad) = hmac_sha3_state(136, sha3_256_digest, key);
+            let mut inner = ipad;
+            inner.extend_from_slice(data);
+            let ih = sha3_256_digest(&inner);
+            let mut outer = opad;
+            outer.extend_from_slice(&ih);
+            Ok(sha3_256_digest(&outer))
+        }
+        "sha3-512" => {
+            let (ipad, opad) = hmac_sha3_state(72, sha3_512_digest, key);
+            let mut inner = ipad;
+            inner.extend_from_slice(data);
+            let ih = sha3_512_digest(&inner);
+            let mut outer = opad;
+            outer.extend_from_slice(&ih);
+            Ok(sha3_512_digest(&outer))
+        }
         other => anyhow::bail!(
             "{}",
             i18n::tf(

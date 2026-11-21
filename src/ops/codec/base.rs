@@ -1732,13 +1732,18 @@ fn base85_decode_with(input: &[u8], alph: &B85Alphabet, ignore: bool) -> anyhow:
         for v in vals.iter_mut().skip(n) {
             *v = 84;
         }
-        let mut val = 0u32;
+        let mut val = 0u64;
         for v in vals.iter() {
-            val = val * 85 + *v;
+            val = val * 85 + u64::from(*v);
+        }
+        // A valid 4-byte group decodes to a value < 2^32; anything larger is
+        // an overlong/invalid encoding (85^5 = 4_437_053_125 > u32::MAX).
+        if val >= (1u64 << 32) {
+            anyhow::bail!("{}", i18n::t("err.base85_incomplete"));
         }
         // n chars encode n-1 bytes; the known digits are the most significant.
         let nbytes = n - 1;
-        let bytes = val.to_be_bytes();
+        let bytes = (val as u32).to_be_bytes();
         out.extend_from_slice(&bytes[..nbytes]);
         // The 'pad' unused digits only make sense for the final group.
         if pad > 0 && i < cleaned.len() {
@@ -1889,13 +1894,19 @@ pub(crate) fn base45_decode(
             out.push((x >> 8) as u8);
             out.push((x & 0xFF) as u8);
             i += 3;
-        } else {
+        } else if rem == 2 {
             let x = vals[i] * 45 + vals[i + 1];
             if x > 0xFF {
                 anyhow::bail!("base45 trailing group value {x} exceeds 1 byte");
             }
             out.push(x as u8);
             i += 2;
+        } else {
+            // A lone trailing symbol (rem == 1) has no legal decode: one
+            // input byte always encodes to two symbols, so a single trailing
+            // symbol is malformed padding. Bail instead of indexing
+            // vals[i + 1] out of bounds.
+            anyhow::bail!("base45 trailing group has a lone symbol (invalid padding)");
         }
     }
     Ok(out)
@@ -2356,7 +2367,7 @@ mod tests {
         assert!(base32_decode(b"========", &std).is_err());
         // Unpadded valid input decodes fine.
         assert_eq!(base32_decode(b"MZXW6", &std).unwrap(), b"foo");
-        // strict checks the unused pad bits are zero (RFC 4648 §3.5).
+        // strict checks the unused pad bits are zero (RFC 4648 section 3.5).
         let strict = HashMap::from([("strict_mode".to_string(), "true".to_string())]);
         assert_eq!(base32_decode(b"MZXW6===", &strict).unwrap(), b"foo");
         // Tampered trailing char with non-zero pad bits is rejected by strict.
@@ -2857,5 +2868,27 @@ mod tests {
         assert_eq!(dec, b"AB");
         // Strict mode fails on CR.
         assert!(base45_decode(with_nl.as_bytes(), &HashMap::new()).is_err());
+    }
+
+    #[test]
+    fn base45_lone_trailing_symbol_rejected() {
+        // A single trailing symbol has no legal decode; the old code indexed
+        // vals[i + 1] out of bounds and panicked. A lone symbol must now bail
+        // with an error instead of panicking.
+        for symbol in b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:" {
+            let input = [*symbol];
+            let err = base45_decode(&input, &HashMap::new()).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("lone symbol"),
+                "symbol {symbol:?} should be rejected as lone trailing symbol, got: {msg}"
+            );
+        }
+        // Two trailing symbols remain valid (1 input byte -> 2 symbols).
+        assert_eq!(
+            base45_decode(b"1K", &HashMap::new()).unwrap(),
+            b"A",
+            "two-symbol trailing group must still decode"
+        );
     }
 }

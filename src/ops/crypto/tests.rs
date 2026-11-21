@@ -299,7 +299,7 @@ fn parse_key_forms() {
 
 #[test]
 fn aes_cbc_roundtrip_known_vector() {
-    // NIST SP 800-38A F.2.1：AES-128-CBC，key=2b7e151628aed2a6abf7158809cf4f3c，
+    // NIST SP 800-38A F.2.1:AES-128-CBC,key=2b7e151628aed2a6abf7158809cf4f3c,
     // iv=000102030405060708090a0b0c0d0e0f, plaintext 6bc1bee22e409f96e93d7e117393172a.
     let a = args(&[
         ("key", "0x2b7e151628aed2a6abf7158809cf4f3c"),
@@ -509,7 +509,7 @@ fn hmac_known_vector() {
 
 #[test]
 fn chacha20_known_keystream_and_roundtrip() {
-    // RFC 8439 §2.3.2: key=000102...1f, nonce=000000000000004a00000000, counter=1.
+    // RFC 8439 section 2.3.2: key=000102...1f, nonce=000000000000004a00000000, counter=1.
     let a = args(&[
         (
             "key",

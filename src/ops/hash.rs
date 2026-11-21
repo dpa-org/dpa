@@ -6,18 +6,21 @@
 
 use std::collections::HashMap;
 
-use blake2::digest::{Update, VariableOutput};
-use blake2::{Blake2b512, Blake2bVar, Blake2sVar};
+use blake2::digest::Update;
+use blake2::digest::typenum::U48;
+use blake2::{Blake2b, Blake2b256, Blake2b512, Blake2s256};
+
+/// BLAKE2b-384 hasher state (blake2 0.11 dropped the 384-bit alias; the
+/// generic Blake2b newtype with a 48-byte output covers it).
+type Blake2b384 = Blake2b<U48>;
 use md4::Md4;
 use md5::Md5;
 use ripemd::{Ripemd128, Ripemd160, Ripemd256, Ripemd320};
 use sha1::Sha1;
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512};
 use sha3::digest::{ExtendableOutput, XofReader};
-use sha3::{
-    Keccak224, Keccak256, Keccak384, Keccak512, Sha3_224, Sha3_256, Sha3_384, Sha3_512, Shake128,
-    Shake256,
-};
+use sha3::{Keccak224, Keccak256, Keccak384, Keccak512, Sha3_224, Sha3_256, Sha3_384, Sha3_512};
+use shake::{Shake128, Shake256};
 use sm3::Sm3;
 use whirlpool::Whirlpool;
 
@@ -505,33 +508,34 @@ impl StreamingOp for RipemdStream {
 }
 
 // ---------------------------------------------------------------------------
-// BLAKE2b-256: variable-output digest, 32-byte output.
+// BLAKE2b-256: fixed 32-byte output.
 // ---------------------------------------------------------------------------
 
-struct Blake2bVarStream {
-    h: Blake2bVar,
+struct Blake2b256Stream {
+    h: Blake2b256,
 }
 
 fn make_hash_blake2b_256(_args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
-    let h = Blake2bVar::new(32)?;
-    Ok(Box::new(Blake2bVarStream { h }))
+    Ok(Box::new(Blake2b256Stream {
+        h: Blake2b256::default(),
+    }))
 }
 
-impl StreamingOp for Blake2bVarStream {
+impl StreamingOp for Blake2b256Stream {
     fn write(&mut self, chunk: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.h.update(chunk);
+        Update::update(&mut self.h, chunk);
         Ok(Vec::new())
     }
 
     fn finish(&mut self) -> anyhow::Result<Vec<u8>> {
-        Ok(self.h.clone().finalize_boxed().to_vec())
+        Ok(self.h.clone().finalize().to_vec())
     }
 }
 
 fn hash_blake2b_256(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    let mut h = Blake2bVar::new(32)?;
-    h.update(input);
-    Ok(h.finalize_boxed().to_vec())
+    let mut h = Blake2b256::default();
+    Update::update(&mut h, input);
+    Ok(h.finalize().to_vec())
 }
 
 impl<D: Digest + Clone> StreamingOp for DigestStream<D> {
@@ -651,41 +655,58 @@ fn hash_blake2b_512(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Re
     Ok(digest::<Blake2b512>(input))
 }
 
+struct Blake2b384Stream {
+    h: Blake2b384,
+}
+
 fn make_hash_blake2b_384(_args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
-    let h = Blake2bVar::new(48)?;
-    Ok(Box::new(Blake2bVarStream { h }))
+    Ok(Box::new(Blake2b384Stream {
+        h: Blake2b384::default(),
+    }))
 }
 
-fn hash_blake2b_384(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    let mut h = Blake2bVar::new(48)?;
-    h.update(input);
-    Ok(h.finalize_boxed().to_vec())
-}
-
-struct Blake2sVarStream {
-    h: Blake2sVar,
-}
-
-fn make_hash_blake2s_256(_args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
-    let h = Blake2sVar::new(32)?;
-    Ok(Box::new(Blake2sVarStream { h }))
-}
-
-impl StreamingOp for Blake2sVarStream {
+impl StreamingOp for Blake2b384Stream {
     fn write(&mut self, chunk: &[u8]) -> anyhow::Result<Vec<u8>> {
-        self.h.update(chunk);
+        Update::update(&mut self.h, chunk);
         Ok(Vec::new())
     }
 
     fn finish(&mut self) -> anyhow::Result<Vec<u8>> {
-        Ok(self.h.clone().finalize_boxed().to_vec())
+        Ok(self.h.clone().finalize().to_vec())
+    }
+}
+
+fn hash_blake2b_384(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
+    let mut h = Blake2b384::default();
+    Update::update(&mut h, input);
+    Ok(h.finalize().to_vec())
+}
+
+struct Blake2s256Stream {
+    h: Blake2s256,
+}
+
+fn make_hash_blake2s_256(_args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
+    Ok(Box::new(Blake2s256Stream {
+        h: Blake2s256::default(),
+    }))
+}
+
+impl StreamingOp for Blake2s256Stream {
+    fn write(&mut self, chunk: &[u8]) -> anyhow::Result<Vec<u8>> {
+        Update::update(&mut self.h, chunk);
+        Ok(Vec::new())
+    }
+
+    fn finish(&mut self) -> anyhow::Result<Vec<u8>> {
+        Ok(self.h.clone().finalize().to_vec())
     }
 }
 
 fn hash_blake2s_256(input: &[u8], _args: &HashMap<String, String>) -> anyhow::Result<Vec<u8>> {
-    let mut h = Blake2sVar::new(32)?;
-    h.update(input);
-    Ok(h.finalize_boxed().to_vec())
+    let mut h = Blake2s256::default();
+    Update::update(&mut h, input);
+    Ok(h.finalize().to_vec())
 }
 
 fn make_hash_md4(args: &HashMap<String, String>) -> anyhow::Result<Box<dyn StreamingOp>> {
@@ -1634,7 +1655,7 @@ fn md4_digest(data: &[u8]) -> [u8; 16] {
     let mut c0: u32 = 0x98badcfe;
     let mut d0: u32 = 0x10325476;
 
-    // Padding (RFC 1320 §3.1): 0x80, zeros to 56 mod 64, then 64-bit LE bit length.
+    // Padding (RFC 1320 section 3.1): 0x80, zeros to 56 mod 64, then 64-bit LE bit length.
     let bit_len = (data.len() as u64).wrapping_mul(8);
     let mut msg = Vec::with_capacity(((data.len() + 72) / 64) * 64);
     msg.extend_from_slice(data);
@@ -1807,11 +1828,11 @@ fn lm_key_from_7(block: &[u8]) -> [u8; 8] {
 }
 
 fn lm_des_encrypt(key: &[u8; 8], msg: &[u8; 8]) -> anyhow::Result<[u8; 8]> {
-    use des::cipher::{BlockEncrypt, KeyInit};
+    use des::cipher::{BlockCipherEncrypt, KeyInit};
     let cipher = des::Des::new_from_slice(key)
         .map_err(|_| anyhow::anyhow!("{}", i18n::t("err.invalid_des_key")))?;
     let mut block: des::cipher::Block<des::Des> =
-        des::cipher::Block::<des::Des>::clone_from_slice(msg);
+        des::cipher::Block::<des::Des>::try_from(&msg[..]).expect("invalid block length");
     cipher.encrypt_block(&mut block);
     let mut out = [0u8; 8];
     out.copy_from_slice(&block);

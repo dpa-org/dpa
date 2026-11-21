@@ -15,6 +15,18 @@ OpenSSL / RFC）对齐之处，以及 dpa 有意保留自身行为之处。实�
 - **失败要响亮。** 非法输入、坏填充、畸形编码一律报错，不做静默的尽力而为输出；
   除非显式传入 `ignore_non_alphabet` / `strict_mode=false` 等参数主动放宽。
 
+### 算子元数据：`output_kind`
+
+自结构化执行结果出口（提交 `e0bcca7`）起，算子可声明只读的 `output_kind`
+（`bytes` / `utf8` / `json` / `yaml` / `hex`）。它属于展示层元数据，执行流水线
+从不读取，因此 `dpa run` 输出逐字节不变。声明来自注册宏的 `$out_kind` 变体或
+集中声明表 `apply_output_kind_declarations`（如 `hex:encode` -> `Hex`、
+`json:to-yaml` -> `Yaml`、`yaml:to-json` -> `Json`、`xml:to-json` -> `Json`）。
+未声明的算子按 `bytes` 处理。`inspect` 入口（`src/api.rs`）按以下顺序解析转换
+目标：显式 `output_kind` 参数 -> 最后一步算子的声明 -> `bytes` 兜底；随后
+`to_structured` 严格校验字节（`Utf8` / `Json` / `Yaml` / `Hex` 对畸形内容响亮
+报错）。完整契约见 OPERATION_CONTRACT.zh-CN.md 第 10 节。
+
 ## 2. 与主流工具的对齐项
 
 以下行为已按主流参考修正，并有差分测试覆盖（`scripts/difftest.py`）：
@@ -88,3 +100,9 @@ OpenSSL / RFC）对齐之处，以及 dpa 有意保留自身行为之处。实�
 | `dpa:pem:to:hex` | `dpa:pem`（action=decode）→ `dpa:hex:encode` |
 | `dpa:lorem:ipsum` | 无内置等价。请使用外部文本源，或由 `dpa:generate:random` / 字面输入在 flow 中拼装示例文本。 |
 
+## 7. 执行控制（引擎级）
+
+与单个算子无关：`EngineConfig.timeout` 与 `EngineConfig.cancel` 为整个 flow
+设界（桌面端第 2 轮协作请求）。在步骤 / 分块检查点轮询；超时窗口用尽报
+`ErrorCode::Timeout`，取消标志置位报 `ErrorCode::Cancelled`。完整契约见
+`OPERATION_CONTRACT.md` 第 11 节。

@@ -20,6 +20,21 @@ sync.
   error instead of silent best-effort output, unless an explicit
   `ignore_non_alphabet` / `strict_mode=false` argument opts out.
 
+### Op metadata: `output_kind`
+
+Since the structured execution-result outlet (commit `e0bcca7`), ops may
+declare a read-only `output_kind` (`bytes` / `utf8` / `json` / `yaml` / `hex`).
+It is presentation metadata, never consulted by the execution pipeline, so
+`dpa run` output is byte-for-byte unchanged. The declaration comes from the
+registration macro's `$out_kind` variant or from the central table
+`apply_output_kind_declarations` (e.g. `hex:encode` -> `Hex`,
+`json:to-yaml` -> `Yaml`, `yaml:to-json` -> `Json`, `xml:to-json` -> `Json`).
+Undeclared ops read as `bytes`. The `inspect` entry point (`src/api.rs`)
+resolves the conversion target as: explicit `output_kind` argument -> the final
+op's declaration -> `bytes` fallback; `to_structured` then validates the bytes
+strictly (`Utf8` / `Json` / `Yaml` / `Hex` fail loudly on malformed content).
+See OPERATION_CONTRACT.md section 10 for the full contract.
+
 ## 2. Alignments with mainstream tools
 
 These behaviors were changed to match mainstream references and are covered by
@@ -109,3 +124,10 @@ instead.
 | `dpa:pem:to:hex` | `dpa:pem` (action=decode) → `dpa:hex:encode` |
 | `dpa:lorem:ipsum` | No built-in equivalent. Use an external text source or a flow that builds the sample text from `dpa:generate:random` / literal input. |
 
+## 7. Execution control (engine-level)
+
+Independent of any single op: `EngineConfig.timeout` and
+`EngineConfig.cancel` bound a whole flow for embedding consumers. Polled at
+step / chunk checkpoints; exceeding the window fails with
+`ErrorCode::Timeout`, a set flag fails with `ErrorCode::Cancelled`. See
+`OPERATION_CONTRACT.md` section 11 for the full contract.
