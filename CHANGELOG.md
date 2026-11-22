@@ -4,6 +4,13 @@ All notable changes to dpa are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Migrated `bzip2` to 0.6 with its pure Rust backend, removing the C build
+  dependency while preserving bzip2 compatibility tests.
+
 ## [1.0.0-rc3] - 2026-11-22
 
 ### Added

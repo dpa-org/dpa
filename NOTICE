@@ -13,3 +13,8 @@ Specifically:
 
 Those files and behaviors remain available to downstream users under the terms
 of the Apache License, Version 2.0.
+
+This product includes the bzip2-rs implementation and its libbz2-rs-sys
+backend, developed by the bzip2-rs contributors and licensed under the
+bzip2-1.0.6 license:
+https://github.com/trifectatechfoundation/bzip2-rs
