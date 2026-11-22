@@ -32,7 +32,12 @@ jobs:
       # The plugin ABI test needs the demo plugin cdylib, which `cargo test`
       # does not build on its own.
       - name: Build plugins
-        run: cargo build -p dpa-plugin-demo
+        shell: bash
+        run: |
+          cargo build -p dpa-plugin-demo --locked --target-dir target/plugin-demo
+          artifact="$PWD/target/plugin-demo/debug/libdpa_plugin_demo.so"
+          test -f "$artifact"
+          echo "DPA_PLUGIN_DEMO_PATH=$artifact" >> "$GITHUB_ENV"
 
       - name: test
         run: cargo test --workspace

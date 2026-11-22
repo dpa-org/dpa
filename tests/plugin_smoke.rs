@@ -15,6 +15,16 @@ use dpa::{engine, flow, ops, plugin};
 /// The demo plugin's cdylib in the build output directory (`target/<profile>/`),
 /// which is two levels up from the test binary in `target/<profile>/deps/`.
 fn demo_plugin_artifact() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("DPA_PLUGIN_DEMO_PATH") {
+        let path = PathBuf::from(path);
+        assert!(
+            path.is_file(),
+            "DPA_PLUGIN_DEMO_PATH does not point to a file: {}",
+            path.display()
+        );
+        return Some(path);
+    }
+
     let dir = std::env::current_exe()
         .ok()?
         .parent()?
